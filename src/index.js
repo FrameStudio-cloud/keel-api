@@ -7,6 +7,8 @@ import { settingsRoutes } from './routes/settings.js'
 import { catalogueRoutes } from './routes/catalogue.js'
 import { bannersRoutes } from './routes/banners.js'
 import { chatRoutes } from './routes/chat.js'
+import { contentRoutes } from './routes/content.js'
+import { productRoutes } from './routes/products.js'
 
 const app = new Hono()
 
@@ -19,6 +21,8 @@ app.route('/api/settings', settingsRoutes)
 app.route('/api/catalogue', catalogueRoutes)
 app.route('/api/banners', bannersRoutes)
 app.route('/api/chat', chatRoutes)
+app.route('/api/content', contentRoutes)
+app.route('/api/products', productRoutes)
 
 const port = parseInt(process.env.PORT || '3001')
 
