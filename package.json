@@ -3,15 +3,20 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": "22.x" },
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "node --watch src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "mcp": "node src/mcp-cli.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.99.3",
-    "hono": "^4.7.0",
     "@hono/node-server": "^1.13.0",
-    "dotenv": "^16.4.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@supabase/supabase-js": "^2.99.3",
+    "dotenv": "^16.4.0",
+    "hono": "^4.7.0",
+    "zod": "^4.4.3"
   }
 }
