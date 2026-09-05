@@ -10,6 +10,7 @@ import { chatRoutes } from './routes/chat.js'
 import { contentRoutes } from './routes/content.js'
 import { productRoutes } from './routes/products.js'
 import { manifestRoutes } from './routes/manifest.js'
+import { pageContentRoutes } from './routes/pageContent.js'
 
 const app = new Hono()
 
@@ -25,6 +26,7 @@ app.route('/api/chat', chatRoutes)
 app.route('/api/content', contentRoutes)
 app.route('/api/products', productRoutes)
 app.route('/api/manifest', manifestRoutes)
+app.route('/api/page-content', pageContentRoutes)
 
 const port = parseInt(process.env.PORT || '3001')
 
