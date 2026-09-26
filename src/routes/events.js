@@ -7,8 +7,12 @@ export const eventsRoutes = new Hono()
 
 /**
  * The closed event vocabulary. Enforced here for a useful 400 message, and
- * again by a CHECK constraint on site_events so a bug in this file still cannot
- * invent an event name.
+ * again by a foreign key to public.event_types, so a bug in this file still
+ * cannot invent an event name.
+ *
+ * event_types is the single source of truth: the console reads its labels from
+ * the same table, so adding an event is one INSERT rather than a change here,
+ * in the SDK and in the UI.
  */
 export const EVENTS = [
   'page_view',
@@ -20,13 +24,14 @@ export const EVENTS = [
   'feature_used',
 ]
 
-const HEALTH_RESOURCES = [
-  'settings',
-  'catalogue',
-  'product',
-  'banners',
-  'page_content',
-]
+/**
+ * Health resources come from public.health_resources, not a constant, so the
+ * collector cannot disagree with the console about what a bar can be for.
+ */
+async function isHealthResource(key) {
+  const { data } = await supabase.rpc('is_health_resource', { p_key: key });
+  return data === true;
+}
 
 /**
  * Keys whose values must never reach an analytics table.
@@ -125,10 +130,11 @@ eventsRoutes.post('/', async (c) => {
     // health events must name the resource they are about, otherwise the console
     // cannot tell which part of the site is broken
     if (name === 'health_ok' || name === 'health_fail') {
-      const res = properties?.resource
-      if (!HEALTH_RESOURCES.includes(res)) {
-        rejected.push({ name, reason: 'health events need a valid resource' })
-        continue
+      const res = properties?.resource;
+      const known = res ? await isHealthResource(res) : false;
+      if (!known) {
+        rejected.push({ name, reason: 'health events need a valid resource' });
+        continue;
       }
     }
 
@@ -154,11 +160,25 @@ eventsRoutes.post('/', async (c) => {
     return c.json({ error: 'No valid events', rejected }, 400)
   }
 
-  const { error } = await supabase.from('site_events').insert(rows)
+  // Attribute to the shop's site so the console can group by site rather than
+  // inferring it. A site token identifies the shop, so this is a lookup, never a
+  // client claim. Shops with more than one site stay unattributed rather than
+  // being guessed at — a site token cannot say which of them it is, and
+  // guessing would put one shop's health on the wrong storefront.
+  const { data: sites } = await supabase
+    .from('sites')
+    .select('id')
+    .eq('shop_id', shopId)
+    .eq('active', true);
+  const siteId = sites && sites.length === 1 ? sites[0].id : null;
+
+  const stamped = rows.map((r) => ({ ...r, site_id: siteId }));
+
+  const { error } = await supabase.from('site_events').insert(stamped);
   if (error) {
-    console.error('[events] insert failed:', error.message)
+    console.error('[events] insert failed:', error.message);
     return c.json({ error: 'Failed to record' }, 500)
   }
 
-  return c.json({ ok: true, accepted: rows.length, rejected }, 201)
+  return c.json({ ok: true, accepted: stamped.length, rejected }, 201)
 })
