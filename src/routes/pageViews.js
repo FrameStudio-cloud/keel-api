@@ -54,10 +54,12 @@ export function sourceFromReferrer(referrer) {
   return host.replace(/^www\./, '').slice(0, 40) || 'Direct'
 }
 
+// `.nullish()` not `.optional()`: JSON clients commonly send an explicit
+// null rather than omitting the key, and optional() alone rejects that.
 const bodySchema = z.object({
-  page: z.string().max(300).optional(),
-  product_name: z.string().max(160).optional(),
-  referrer: z.string().max(500).optional(),
+  page: z.string().max(300).nullish(),
+  product_name: z.string().max(160).nullish(),
+  referrer: z.string().max(500).nullish(),
 })
 
 // Requires a write token: enforced by siteAuth() before we get here.
