@@ -25,6 +25,12 @@ export function sourceFromReferrer(referrer) {
     if (!host || host.includes('/') || host.includes(' ')) return 'Direct'
   }
 
+  // Local and preview hosts are not traffic. A Vercel preview or a local dev
+  // server would otherwise show up as its own "source" and dilute real numbers.
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local') || host.endsWith('.localhost')) {
+    return 'Direct'
+  }
+
   const exact = {
     'google.com': 'Google',
     'bing.com': 'Bing',
