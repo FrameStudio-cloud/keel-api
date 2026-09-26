@@ -79,10 +79,13 @@ function scrub(value, depth = 0) {
 
 const eventSchema = z.object({
   name: z.enum(EVENTS),
-  properties: z.record(z.any()).optional(),
-  path: z.string().max(300).optional(),
+  properties: z.record(z.any()).nullish(),
+  // nullish, not optional: a client that cannot determine a location (SSR, a
+  // worker, a test harness) legitimately sends path: null, and `.optional()`
+  // rejects null - which silently drops every event that has no path.
+  path: z.string().max(300).nullish(),
   // client clock; clamped server-side so a skewed device cannot backdate forever
-  occurred_at: z.number().int().optional(),
+  occurred_at: z.number().int().nullish(),
 })
 
 /**
