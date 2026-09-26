@@ -38,13 +38,40 @@ describe("sourceFromReferrer", () => {
     }
   });
 
-  // Deliberately NOT filtered: a shop's production site may itself live on a
-  // vercel.app domain (kikoi is kikoi-opal.vercel.app), so treating
-  // *.vercel.app as Direct would throw away its real traffic. Preview deploys
-  // are therefore attributed by hostname; test against the production URL.
-  it("keeps a vercel.app host as a real source", () => {
-    expect(sourceFromReferrer("https://kikoi-opal.vercel.app/shop")).toBe(
-      "kikoi-opal.vercel.app"
+  // Real bug seen in live data: browsing your own catalogue made the shop's own
+  // domain the reported "traffic source", because document.referrer on an
+  // internal hop is the previous page of the same site.
+  it("treats internal navigation as Direct", () => {
+    expect(
+      sourceFromReferrer("https://kikoi-opal.vercel.app/shop", "https://kikoi-opal.vercel.app")
+    ).toBe("Direct");
+    expect(
+      sourceFromReferrer("https://shop.example.com/a", "https://shop.example.com")
+    ).toBe("Direct");
+  });
+
+  it("still attributes genuine external traffic on the same site", () => {
+    expect(
+      sourceFromReferrer("https://www.google.com/search?q=x", "https://kikoi-opal.vercel.app")
+    ).toBe("Google");
+    expect(
+      sourceFromReferrer("https://l.facebook.com/l.php", "https://kikoi-opal.vercel.app")
+    ).toBe("Facebook");
+  });
+
+  it("ignores a port and www prefix when comparing hosts", () => {
+    expect(
+      sourceFromReferrer("https://www.example.com:443/x", "https://example.com")
+    ).toBe("Direct");
+  });
+
+  // Deliberately NOT filtered by suffix: a shop's production site may itself
+  // live on a vercel.app domain (kikoi is kikoi-opal.vercel.app), so that would
+  // throw away its real traffic. Preview deploys are therefore attributed by
+  // hostname; test analytics against the production URL.
+  it("keeps a vercel.app host as a real source when it is genuinely external", () => {
+    expect(sourceFromReferrer("https://other-shop.vercel.app/shop")).toBe(
+      "other-shop.vercel.app"
     );
   });
 
