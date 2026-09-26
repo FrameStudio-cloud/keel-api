@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { supabase } from '../db.js'
+import { shopIdOf } from '../auth.js'
 
 export const chatRoutes = new Hono()
 
 chatRoutes.get('/config', async (c) => {
-  const shopId = c.req.query('shop_id')
-  if (!shopId) return c.json({ error: 'shop_id is required' }, 400)
+  const shopId = shopIdOf(c)
 
   const { data, error } = await supabase
     .from('chat_config')
@@ -18,8 +18,7 @@ chatRoutes.get('/config', async (c) => {
 })
 
 chatRoutes.get('/faqs', async (c) => {
-  const shopId = c.req.query('shop_id')
-  if (!shopId) return c.json({ error: 'shop_id is required' }, 400)
+  const shopId = shopIdOf(c)
 
   const { data, error } = await supabase
     .from('chat_faqs')

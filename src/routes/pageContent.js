@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { supabase } from '../db.js'
+import { shopIdOf } from '../auth.js'
 
 export const pageContentRoutes = new Hono()
 
 pageContentRoutes.get('/', async (c) => {
-  const shopId = c.req.query('shop_id')
-  if (!shopId) return c.json({ error: 'shop_id is required' }, 400)
+  const shopId = shopIdOf(c)
 
   const page = c.req.query('page')
   const section = c.req.query('section')

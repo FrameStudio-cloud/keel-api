@@ -1,11 +1,11 @@
 import { Hono } from 'hono'
 import { supabase } from '../db.js'
+import { shopIdOf } from '../auth.js'
 
 export const catalogueRoutes = new Hono()
 
 catalogueRoutes.get('/', async (c) => {
-  const shopId = c.req.query('shop_id')
-  if (!shopId) return c.json({ error: 'shop_id is required' }, 400)
+  const shopId = shopIdOf(c)
 
   const id = c.req.query('id')
   const available = c.req.query('available')
