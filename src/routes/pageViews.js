@@ -94,11 +94,15 @@ const bodySchema = z.object({
   product_name: z.string().max(160).nullish(),
   referrer: z.string().max(500).nullish(),
   // Anonymous first-party identity, grouped not trusted. See identity.js for
-  // why these are z.string() and not z.string().uuid(). Omitted by a storefront
-  // whose visitor asked not to be tracked, and the owner-facing "visitors today"
-  // figure simply counts fewer people rather than guessing at any.
-  visitor_id: z.string().nullish(),
-  session_id: z.string().nullish(),
+  // why a malformed id must cost the identity, not the event.
+  //
+  // z.unknown(), not z.string(): a numeric or object id would fail the schema
+  // and reject the whole page view, which is the one outcome this is written to
+  // prevent. Omitted by a storefront whose visitor asked not to be tracked, and
+  // the owner-facing "visitors today" figure simply counts fewer people rather
+  // than guessing at any.
+  visitor_id: z.unknown(),
+  session_id: z.unknown(),
 })
 
 // Requires a write token: enforced by siteAuth() before we get here.

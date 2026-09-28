@@ -93,11 +93,20 @@ const eventSchema = z.object({
   // client clock; clamped server-side so a skewed device cannot backdate forever
   occurred_at: z.number().int().nullish(),
   // Anonymous first-party identity, grouped not trusted. See identity.js for
-  // why these are z.string() and not z.string().uuid(): a malformed id must
-  // cost the identity, not the event. Absent when the visitor asked not to be
-  // tracked, and shop_id still comes from the token - never from here.
-  visitor_id: z.string().nullish(),
-  session_id: z.string().nullish(),
+  // why a malformed id must cost the identity, not the event.
+  //
+  // z.unknown(), NOT z.string().nullish(). The string schema looked safe and
+  // was not: it drops a malformed *string* to null correctly, but a numeric or
+  // object id fails the schema, which rejects the whole event. That is exactly
+  // the outcome identity.js exists to prevent - one storefront sending the
+  // wrong type loses its health reports, its errors and its product views,
+  // silently, with a 400 per item and nothing that says why. The SDK only ever
+  // sends a string or nothing, so this cannot be reached by the SDK; it is
+  // reachable by a forked or hand-rolled storefront, which is who the principle
+  // was written for. Accept anything here and let identityId() judge it, so the
+  // schema and the stated design agree.
+  visitor_id: z.unknown(),
+  session_id: z.unknown(),
 })
 
 /**

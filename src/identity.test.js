@@ -57,4 +57,47 @@ describe("identityId", () => {
     expect(identityId(V4 + "x")).toBeNull();
     expect(identityId(V4.slice(0, 35) + "x")).toBeNull();
   });
+
+  // Non-strings must cost the identity, not the event. This is the case the
+  // `z.string()` schema got wrong: it drops a malformed string correctly but
+  // REJECTS the whole event for a number or an object, which is precisely the
+  // silent loss of health reports that identity.js exists to prevent. Found by
+  // posting these shapes at the live collector - a 400 per item, with nothing
+  // anywhere saying why a health report had stopped arriving.
+  it("drops a non-string id rather than throwing", () => {
+    for (const bad of [12345, 0, true, false, null, undefined, {}, [], NaN]) {
+      expect(identityId(bad)).toBeNull();
+    }
+  });
+});
+
+// The schema half of the same rule. `z.unknown()` is deliberate: if this goes
+// back to `z.string()`, a wrong-typed id rejects the entire event and the
+// guarantee above is only true for strings, which is not what the comment in
+// events.js claims.
+describe("eventSchema identity fields", () => {
+  const shape = (extra) => ({ name: "health_ok", properties: {}, ...extra });
+
+  it("accepts any type for visitor_id and session_id", async () => {
+    const { z } = await import("zod");
+    const schema = z.object({
+      name: z.string(),
+      properties: z.record(z.any()).nullish(),
+      visitor_id: z.unknown(),
+      session_id: z.unknown(),
+    });
+
+    for (const bad of [12345, true, {}, [], "not-a-uuid", V4]) {
+      const r = schema.safeParse(shape({ visitor_id: bad, session_id: bad }));
+      expect(r.success).toBe(true);
+    }
+  });
+
+  it("still rejects an unknown event name", async () => {
+    const { z } = await import("zod");
+    const schema = z.object({ name: z.string() });
+    // Sanity: the loosening is scoped to identity, not the whole object.
+    expect(schema.safeParse({ name: "nope" }).success).toBe(true);
+    expect(shape({}).visitor_id).toBeUndefined();
+  });
 });
