@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../db.js'
 import { shopIdOf } from '../auth.js'
+import { identityId } from '../identity.js'
 
 export const eventsRoutes = new Hono()
 
@@ -91,6 +92,12 @@ const eventSchema = z.object({
   path: z.string().max(300).nullish(),
   // client clock; clamped server-side so a skewed device cannot backdate forever
   occurred_at: z.number().int().nullish(),
+  // Anonymous first-party identity, grouped not trusted. See identity.js for
+  // why these are z.string() and not z.string().uuid(): a malformed id must
+  // cost the identity, not the event. Absent when the visitor asked not to be
+  // tracked, and shop_id still comes from the token - never from here.
+  visitor_id: z.string().nullish(),
+  session_id: z.string().nullish(),
 })
 
 /**
@@ -125,7 +132,7 @@ eventsRoutes.post('/', async (c) => {
       rejected.push({ name: item?.name ?? null, reason: 'invalid' })
       continue
     }
-    const { name, properties, path, occurred_at: at } = parsed.data
+    const { name, properties, path, occurred_at: at, visitor_id, session_id } = parsed.data
 
     // health events must name the resource they are about, otherwise the console
     // cannot tell which part of the site is broken
@@ -152,6 +159,11 @@ eventsRoutes.post('/', async (c) => {
       name,
       properties: scrub(properties ?? {}) ?? {},
       path: path ? path.slice(0, 300) : null,
+      // Grouping keys only. shop_id above is derived from the token, so a
+      // visitor id can join one shop's rows together and can never move a row
+      // between shops.
+      visitor_id: identityId(visitor_id),
+      session_id: identityId(session_id),
       occurred_at: occurred.toISOString(),
     })
   }

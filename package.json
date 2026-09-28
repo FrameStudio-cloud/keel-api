@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "mcp": "node src/mcp-cli.js"
+    "mcp": "node src/mcp-cli.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
@@ -18,5 +19,8 @@
     "dotenv": "^16.4.0",
     "hono": "^4.7.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }

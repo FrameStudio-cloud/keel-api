@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../db.js'
 import { shopIdOf } from '../auth.js'
+import { identityId } from '../identity.js'
 
 export const pageViewsRoutes = new Hono()
 
@@ -92,6 +93,12 @@ const bodySchema = z.object({
   page: z.string().max(300).nullish(),
   product_name: z.string().max(160).nullish(),
   referrer: z.string().max(500).nullish(),
+  // Anonymous first-party identity, grouped not trusted. See identity.js for
+  // why these are z.string() and not z.string().uuid(). Omitted by a storefront
+  // whose visitor asked not to be tracked, and the owner-facing "visitors today"
+  // figure simply counts fewer people rather than guessing at any.
+  visitor_id: z.string().nullish(),
+  session_id: z.string().nullish(),
 })
 
 // Requires a write token: enforced by siteAuth() before we get here.
@@ -110,7 +117,7 @@ pageViewsRoutes.post('/', async (c) => {
     return c.json({ error: 'Invalid payload' }, 400)
   }
 
-  const { page, product_name, referrer } = parsed.data
+  const { page, product_name, referrer, visitor_id, session_id } = parsed.data
   if (!page) return c.json({ error: 'page is required' }, 400)
 
   // Prefer the actual browser referrer header; fall back to what the client sent
@@ -126,6 +133,11 @@ pageViewsRoutes.post('/', async (c) => {
     page,
     product_name: product_name || null,
     referrer: sourceFromReferrer(rawReferrer, selfHost),
+    // Grouping keys only. shop_id above is derived from the site token, so a
+    // visitor id can join one shop's rows together and can never move a row
+    // between shops.
+    visitor_id: identityId(visitor_id),
+    session_id: identityId(session_id),
   })
 
   if (error) {
