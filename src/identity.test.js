@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 import { identityId } from "./identity.js";
 
 const V4 = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -71,33 +72,53 @@ describe("identityId", () => {
   });
 });
 
-// The schema half of the same rule. `z.unknown()` is deliberate: if this goes
-// back to `z.string()`, a wrong-typed id rejects the entire event and the
-// guarantee above is only true for strings, which is not what the comment in
-// events.js claims.
+// The schema half of the same rule. `z.unknown().optional()` is deliberate on
+// both counts, and both have to be tested separately:
+//
+//   - NOT z.string(): a wrong-typed id rejects the entire event.
+//   - `.optional()` is load-bearing: in zod v4 a bare z.unknown() is REQUIRED.
+//     That shipped, and it rejected every event that carried no identity - most
+//     of them, since the SDK omits the fields when a visitor opts out. A test
+//     that only checked present values passed while the route was broken.
 describe("eventSchema identity fields", () => {
-  const shape = (extra) => ({ name: "health_ok", properties: {}, ...extra });
-
-  it("accepts any type for visitor_id and session_id", async () => {
-    const { z } = await import("zod");
-    const schema = z.object({
+  const IDENTITY_SCHEMA = () =>
+    z.object({
       name: z.string(),
       properties: z.record(z.any()).nullish(),
-      visitor_id: z.unknown(),
-      session_id: z.unknown(),
+      path: z.string().max(300).nullish(),
+      occurred_at: z.number().int().nullish(),
+      visitor_id: z.unknown().optional(),
+      session_id: z.unknown().optional(),
     });
 
-    for (const bad of [12345, true, {}, [], "not-a-uuid", V4]) {
-      const r = schema.safeParse(shape({ visitor_id: bad, session_id: bad }));
-      expect(r.success).toBe(true);
+  it("accepts any type for visitor_id and session_id", () => {
+    const schema = IDENTITY_SCHEMA();
+    for (const bad of [12345, 0, true, false, null, {}, [], "not-a-uuid", V4]) {
+      const r = schema.safeParse({ name: "health_ok", properties: {}, visitor_id: bad, session_id: bad });
+      expect(r.success, `rejected ${JSON.stringify(bad)}`).toBe(true);
     }
   });
 
-  it("still rejects an unknown event name", async () => {
-    const { z } = await import("zod");
-    const schema = z.object({ name: z.string() });
-    // Sanity: the loosening is scoped to identity, not the whole object.
-    expect(schema.safeParse({ name: "nope" }).success).toBe(true);
-    expect(shape({}).visitor_id).toBeUndefined();
+  // The case that caught the bare z.unknown() regression.
+  it("treats an ABSENT identity as valid, not as a schema error", () => {
+    const schema = IDENTITY_SCHEMA();
+    const r = schema.safeParse({ name: "health_ok", properties: {} });
+    expect(r.success).toBe(true);
+    expect(r.data.visitor_id).toBeUndefined();
+    expect(r.data.session_id).toBeUndefined();
+  });
+
+  it("still rejects an unknown event name", () => {
+    const schema = z.object({ name: z.enum(["health_ok", "health_fail", "error", "page_view"]) });
+    expect(schema.safeParse({ name: "not_a_real_event" }).success).toBe(false);
+  });
+
+  // A bare z.unknown() is the regression, pinned so it cannot come back.
+  it("bare z.unknown() would be required, which is why .optional() is there", () => {
+    const bare = z.object({ name: z.string(), visitor_id: z.unknown() });
+    const fixed = IDENTITY_SCHEMA();
+    const payload = { name: "health_ok" };
+    expect(bare.safeParse(payload).success).toBe(false);
+    expect(fixed.safeParse(payload).success).toBe(true);
   });
 });

@@ -96,13 +96,15 @@ const bodySchema = z.object({
   // Anonymous first-party identity, grouped not trusted. See identity.js for
   // why a malformed id must cost the identity, not the event.
   //
-  // z.unknown(), not z.string(): a numeric or object id would fail the schema
-  // and reject the whole page view, which is the one outcome this is written to
-  // prevent. Omitted by a storefront whose visitor asked not to be tracked, and
-  // the owner-facing "visitors today" figure simply counts fewer people rather
+  // z.unknown().optional(), not z.string(): a numeric or object id would fail
+  // the schema and reject the whole page view, which is the one outcome this is
+  // written to prevent. `.optional()` matters too - a bare z.unknown() is
+  // required in zod v4 and would reject every view with no identity.
+  // Omitted by a storefront whose visitor asked not to be tracked, and the
+  // owner-facing "visitors today" figure simply counts fewer people rather
   // than guessing at any.
-  visitor_id: z.unknown(),
-  session_id: z.unknown(),
+  visitor_id: z.unknown().optional(),
+  session_id: z.unknown().optional(),
 })
 
 // Requires a write token: enforced by siteAuth() before we get here.

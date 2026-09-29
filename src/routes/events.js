@@ -95,18 +95,23 @@ const eventSchema = z.object({
   // Anonymous first-party identity, grouped not trusted. See identity.js for
   // why a malformed id must cost the identity, not the event.
   //
-  // z.unknown(), NOT z.string().nullish(). The string schema looked safe and
-  // was not: it drops a malformed *string* to null correctly, but a numeric or
-  // object id fails the schema, which rejects the whole event. That is exactly
-  // the outcome identity.js exists to prevent - one storefront sending the
-  // wrong type loses its health reports, its errors and its product views,
-  // silently, with a 400 per item and nothing that says why. The SDK only ever
-  // sends a string or nothing, so this cannot be reached by the SDK; it is
+  // z.unknown().optional(), NOT z.string().nullish(). The string schema looked
+  // safe and was not: it drops a malformed *string* to null correctly, but a
+  // numeric or object id fails the schema, which rejects the whole event. That
+  // is exactly the outcome identity.js exists to prevent - one storefront
+  // sending the wrong type loses its health reports, its errors and its product
+  // views, silently, with a 400 per item and nothing that says why. The SDK
+  // only ever sends a string or nothing, so it cannot reach this; it is
   // reachable by a forked or hand-rolled storefront, which is who the principle
-  // was written for. Accept anything here and let identityId() judge it, so the
-  // schema and the stated design agree.
-  visitor_id: z.unknown(),
-  session_id: z.unknown(),
+  // was written for.
+  //
+  // `.optional()` is load-bearing, not decoration. In zod v4 a bare z.unknown()
+  // is REQUIRED, so it rejects an event that carries no identity at all - which
+  // is most of them, since the SDK omits the fields when a visitor opts out.
+  // That shipped once and was caught only by testing the absent case; the
+  // regression test below exists so it cannot happen again.
+  visitor_id: z.unknown().optional(),
+  session_id: z.unknown().optional(),
 })
 
 /**
