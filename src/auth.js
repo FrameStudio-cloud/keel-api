@@ -11,22 +11,38 @@ import { supabase } from './db.js'
  *   read_token   -> GET only
  *   write_token  -> GET + POST
  *
- * Fallback for sites that have not been migrated yet: if NO token is presented we
- * try to identify the shop from the request's Origin/Referer hostname matched
- * against the shop's registered website_url. That is tenant-safe (a caller can
- * only ever resolve the shop that owns the hostname it came from) and lets us
- * roll out without an outage. It never honours a client-supplied shop_id.
+ * There is deliberately no fallback. An earlier version identified the shop from
+ * the request's Origin/Referer hostname when no token was presented, matched with
+ * `.ilike('website_url', '%host%')`, and called that tenant-safe. It was not:
+ *
+ *   1. Origin and Referer are ordinary request headers. `curl -H "Origin:
+ *      https://kikoi-opal.vercel.app"` sets one, so a browser convention was being
+ *      used as an authentication control.
+ *   2. The match was a substring test, so `Origin: https://vercel.app` also
+ *      resolved a shop registered at `kikoi-opal.vercel.app`.
+ *
+ * Verified live before removal: with a forged Origin header and no credential of
+ * any kind, `GET /api/settings` returned a real tenant's `paystack_subaccount_code`,
+ * `paystack_subaccount.bank_name`, `store_phone`, `store_address` and the owner's
+ * email from `notification_preferences`. Every read route leaked. This is why the
+ * rule is "a token, or nothing": the token is a secret the caller has to possess,
+ * and a request header is not.
+ *
+ * Both storefronts with a registered website_url hold an active token, so the
+ * migration path is issuing one and setting it in the site's build.
  */
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
+/**
+ * The token is read from headers only.
+ *
+ * `?site_token=` used to be accepted, which is the reason a token ends up in
+ * access logs, browser history and Referer headers. If a storefront still sends
+ * it there, it fails with a 401 that says exactly what to do instead.
+ */
 function tokenFrom(c) {
-  return (
-    c.req.header('x-keel-site-token') ||
-    c.req.header('x-keel-token') ||
-    c.req.query('site_token') ||
-    ''
-  )
+  return c.req.header('x-keel-site-token') || c.req.header('x-keel-token') || ''
 }
 
 async function resolveByToken(token) {
@@ -42,45 +58,12 @@ async function resolveByToken(token) {
   return { shopId: row.shop_id, canWrite: row.can_write === true }
 }
 
-async function hostnameOf(c) {
-  const candidates = [
-    c.req.header('origin'),
-    c.req.header('referer'),
-  ]
-  for (const raw of candidates) {
-    if (!raw) continue
-    try {
-      const host = new URL(raw).hostname
-      // localhost / preview deploys can't match a registered website_url
-      if (host && host !== 'localhost' && !host.endsWith('.local')) return host
-    } catch {
-      // not a URL, ignore
-    }
-  }
-  return null
-}
-
 /**
- * Fallback identification for unmigrated sites: match the caller's hostname
- * against the website_url the shop registered in Keel. Only ever returns the
- * shop that owns that hostname.
+ * In-memory fixed-window rate limiter.
+ *
+ * Keyed by the presented token, so one shop's traffic can never exhaust another's
+ * budget.
  */
-async function resolveByHostname(host) {
-  const { data, error } = await supabase
-    .from('store_settings')
-    .select('shop_id')
-    .ilike('website_url', `%${host}%`)
-    .limit(1)
-    .maybeSingle()
-  if (error) {
-    console.error('[auth] hostname lookup failed:', error.message)
-    return null
-  }
-  if (!data) return null
-  return { shopId: data.shop_id, canWrite: false }
-}
-
-/** In-memory fixed-window rate limiter, keyed by token. */
 const buckets = new Map()
 
 function rateLimit(key, max, windowMs) {
@@ -100,50 +83,70 @@ setInterval(() => {
   for (const [k, v] of buckets) if (now - v.start > 60_000) buckets.delete(k)
 }, 60_000).unref?.()
 
-export function siteAuth({ write = { max: 60, windowMs: 60_000 } } = {}) {
+/**
+ * @param {object} [opts]
+ * @param {{max:number,windowMs:number}} [opts.read]    budget for a read token
+ * @param {{max:number,windowMs:number}} [opts.write]   budget for a write token
+ * @param {{max:number,windowMs:number}} [opts.preAuth] DoS guard on the token table
+ */
+export function siteAuth({
+  read = { max: 120, windowMs: 60_000 },
+  write = { max: 60, windowMs: 60_000 },
+  preAuth = { max: 300, windowMs: 60_000 },
+} = {}) {
   return async (c, next) => {
-    if (c.req.path === '/') return next()
-
     const token = tokenFrom(c)
     let identity = null
 
     if (token) {
+      // Bound the cost of a token flood BEFORE any database work, so guessing
+      // cannot be used to hammer resolve_site_token.
+      //
+      // This bucket is keyed by token, which means a VALID token passes through
+      // it too - we cannot know validity until we have queried. So it is a DoS
+      // guard, not a client budget, and it is deliberately set well above
+      // `read`/`write`. An earlier draft used a small value here (10/min) and
+      // silently throttled every legitimate read to 10 requests a minute, because
+      // a test asserting "read tokens are limited" could not tell the two
+      // buckets apart.
+      if (!rateLimit(`a:${token}`, preAuth.max, preAuth.windowMs)) {
+        return c.json({ error: 'Too many requests' }, 429)
+      }
       identity = await resolveByToken(token)
       if (!identity) {
         return c.json({ error: 'Invalid or revoked site token' }, 401)
       }
-      if (!identity.canWrite && !rateLimit(`w:${token}`, write.max, write.windowMs)) {
+      // The budget follows the credential's authority. This was previously
+      // `!identity.canWrite && !rateLimit(...)`, which applied the WRITE budget
+      // to READ tokens and left write tokens entirely unlimited - the guard
+      // contradicted both the parameter name and the commit message.
+      const budget = identity.canWrite ? write : read
+      if (!rateLimit(`w:${token}`, budget.max, budget.windowMs)) {
         return c.json({ error: 'Too many requests' }, 429)
       }
     } else {
-      const host = await hostnameOf(c)
-      if (host) identity = await resolveByHostname(host)
-      if (!identity) {
-        return c.json(
-          {
-            error:
-              'Missing site token. Pass x-keel-site-token, or serve this request from a hostname registered as a shop website_url.',
-          },
-          401
-        )
-      }
+      return c.json(
+        {
+          error:
+            'Missing site token. Pass x-keel-site-token. Tokens are issued per storefront; a request with no token is not identified with a shop.',
+        },
+        401
+      )
     }
 
     c.set('shopId', identity.shopId)
     c.set('canWrite', identity.canWrite)
-    c.set('viaToken', Boolean(token))
+    c.set('viaToken', true)
 
     if (WRITE_METHODS.has(c.req.method) && !identity.canWrite) {
       return c.json({ error: 'This endpoint requires a write token' }, 403)
     }
 
     // best-effort last-used stamp; never block the response on it
-    if (token) {
-      supabase.rpc('touch_site_token', { p_token: token }).then(
-        () => {},
-        () => {}
-      )
-    }
+    supabase.rpc('touch_site_token', { p_token: token }).then(
+      () => {},
+      () => {}
+    )
 
     await next()
   }

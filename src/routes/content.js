@@ -122,9 +122,10 @@ contentRoutes.get('/ideas', async (c) => {
 })
 
 contentRoutes.post('/captions', async (c) => {
-  const { shopId, productNames, shopName, tone } = await c.req.json()
-  if (!shopId || !productNames || productNames.length === 0) {
-    return c.json({ error: 'shop_id and productNames are required' }, 400)
+  const shopId = shopIdOf(c)
+  const { productNames, shopName, tone } = await c.req.json()
+  if (!productNames || productNames.length === 0) {
+    return c.json({ error: 'productNames is required' }, 400)
   }
 
   const apiKey = process.env.GROQ_API_KEY
@@ -133,6 +134,10 @@ contentRoutes.post('/captions', async (c) => {
   const { data: settings } = await supabase
     .from('store_settings')
     .select('store_name, whatsapp')
+    // Token-derived, not body-derived. This used to read the caller's `shopId`
+    // from the request body, so a write-token holder could read another shop's
+    // store name and WhatsApp number and have them written into generated
+    // captions.
     .eq('shop_id', shopId)
     .maybeSingle()
 
