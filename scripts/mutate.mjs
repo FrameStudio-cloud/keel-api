@@ -16,6 +16,11 @@ const MUTATIONS = [
   ['src/auth.js', /if \(token\) \{/, 'if (true) {', 'auth: token branch widened to accept no token'],
   ['src/auth.js', /const budget = identity\.canWrite \? write : read/, 'const budget = read', 'auth: rate limit un-inverted'],
   ['src/auth.js', /canWrite: row\.can_write === true/, 'canWrite: !!row.can_write', 'auth: can_write loosened'],
+  ['src/routes/services.js', /^\s*\.eq\('shop_id', shopId\)\s*$/m, '', 'services: shop filter removed'],
+  ['src/routes/services.js', /\.eq\('visible', true\)/, '', 'services: hidden rows published'],
+  ['src/routes/services.js', /\.select\(PUBLIC_SERVICE_COLUMNS\.join\(','\)\)/, ".select('*')", 'services: select(*)'],
+  ['src/routes/services.js', /order\('category', \{ ascending: true \}\)\.order\('name', \{ ascending: true \}\)/, ".order('created_at', { ascending: false })", 'services: unstable ordering'],
+  ['src/routes/services.js', /if \(error\) return c\.json\(\{ error: error\.message \}, 500\)/, 'if (error) return c.json([])', 'services: DB error looks like empty'],
 ]
 
 let caught = 0

@@ -5,6 +5,7 @@ import { cors } from 'hono/cors'
 import { shopRoutes } from './routes/shop.js'
 import { settingsRoutes } from './routes/settings.js'
 import { catalogueRoutes } from './routes/catalogue.js'
+import { servicesRoutes } from './routes/services.js'
 import { bannersRoutes } from './routes/banners.js'
 import { chatRoutes } from './routes/chat.js'
 import { contentRoutes } from './routes/content.js'
@@ -43,6 +44,7 @@ app.use('/api/*', siteAuth())
 app.route('/api/shop', shopRoutes)
 app.route('/api/settings', settingsRoutes)
 app.route('/api/catalogue', catalogueRoutes)
+app.route('/api/services', servicesRoutes)
 app.route('/api/banners', bannersRoutes)
 app.route('/api/chat', chatRoutes)
 app.route('/api/content', contentRoutes)
