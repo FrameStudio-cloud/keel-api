@@ -21,6 +21,9 @@ const MUTATIONS = [
   ['src/routes/services.js', /\.select\(PUBLIC_SERVICE_COLUMNS\.join\(','\)\)/, ".select('*')", 'services: select(*)'],
   ['src/routes/services.js', /order\('category', \{ ascending: true \}\)\.order\('name', \{ ascending: true \}\)/, ".order('created_at', { ascending: false })", 'services: unstable ordering'],
   ['src/routes/services.js', /if \(error\) return c\.json\(\{ error: error\.message \}, 500\)/, 'if (error) return c.json([])', 'services: DB error looks like empty'],
+  ['src/routes/pageContent.js', /\.is\('page_key', null\)/, '', 'page-content: legacy rows leak into sections'],
+  ['src/routes/pageContent.js', /if \(page\) \{/, 'if (false) {', 'page-content: page addressing removed'],
+  ['src/routes/pageContent.js', /return c\.json\(\[\]\)/, "return supabase.from('page_content').select('*').eq('shop_id', shopId).limit(5).then(r => r.data || [])", 'page-content: unaddressed read becomes a dump'],
 ]
 
 let caught = 0
