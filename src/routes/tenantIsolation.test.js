@@ -233,6 +233,32 @@ describe('a storefront is never served another shop’s settings', () => {
       expect(cols, needed).toContain(needed)
     }
   })
+
+  it('publishes feature_toggles, which is only ever { key: { enabled } }', async () => {
+    // The omission was silent: a site gating a component on this read
+    // `undefined`, the component never rendered, and the owner toggled a switch
+    // in Keel that could not have worked. The column holds no credential, so it
+    // belongs here; the assertion exists so a future narrowing of the list does
+    // not quietly break every gate again.
+    await mount(settingsRoutes, '/api/settings')
+    const rec = calls.find((c) => c.table === 'store_settings')
+    expect(rec.selected.split(',')).toContain('feature_toggles')
+  })
+
+  it('still withholds the paystack and notification columns', async () => {
+    // The reason this route names its columns at all. Asserted explicitly so
+    // "add everything the storefronts need" can never be read as "select all".
+    await mount(settingsRoutes, '/api/settings')
+    const rec = calls.find((c) => c.table === 'store_settings')
+    const cols = rec.selected.split(',')
+    for (const secret of [
+      'paystack_subaccount_code',
+      'paystack_subaccount',
+      'notification_preferences',
+    ]) {
+      expect(cols, secret).not.toContain(secret)
+    }
+  })
 })
 
 describe('chat widget config does not carry the table’s secrets', () => {

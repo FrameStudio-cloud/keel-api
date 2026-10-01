@@ -16,6 +16,14 @@ export const settingsRoutes = new Hono()
  * store_settings from now on is published to the internet automatically, and
  * nobody reviews it. A new column is a decision, not a side effect.
  *
+ * `feature_toggles` is a jsonb of `{ <featureKey>: { enabled: boolean } }` — a
+ * shop's own on/off switches, with no credential in it. It was absent here, and
+ * the result was not a missing nicety: a storefront gating components on it got
+ * nothing back, every gate read `undefined`, and each of those features silently
+ * never rendered. Keel showed the owner a working "Back to Top" switch and
+ * toggling it did nothing. The keys are the same ones the site's manifest
+ * declares under `features`, which is what makes the two halves line up.
+ *
  * If a storefront needs a field that is not here, add it deliberately and say why
  * in the commit - do not widen the whole row.
  */
@@ -40,6 +48,7 @@ const PUBLIC_SETTINGS = [
   'name_accent',
   'featured_product_ids',
   'website_url',
+  'feature_toggles',
 ]
 
 settingsRoutes.get('/', async (c) => {
