@@ -26,11 +26,22 @@ export const EVENTS = [
 ]
 
 /**
- * Health resources come from public.health_resources, not a constant, so the
- * collector cannot disagree with the console about what a bar can be for.
+ * Health resources come from the database, not a constant, so the collector
+ * cannot disagree with the console about what a bar can be for.
+ *
+ * As of 20261002_site_health_resources.sql the question is also per-site: a site
+ * may only report what it declared for itself. The SDK no longer filters these
+ * names in the browser - health resources became per-site and the SDK cannot know
+ * a site's declarations - so this is the gate, and the one that can refuse with a
+ * reason attached.
+ *
+ * A null siteId falls back to the global registry. That is the multi-site case:
+ * a shop with two or more active sites cannot be attributed to one of them from
+ * a site token, so its resources are checked the old way rather than being
+ * refused wholesale.
  */
-async function isHealthResource(key) {
-  const { data } = await supabase.rpc('is_health_resource', { p_key: key });
+async function isHealthResource(key, siteId = null) {
+  const { data } = await supabase.rpc('is_health_resource', { p_key: key, p_site_id: siteId });
   return data === true;
 }
 
@@ -123,8 +134,45 @@ const eventSchema = z.object({
  * Health fires on transitions only, so a broken site produces one event per
  * change of state rather than one per page view.
  */
+/**
+ * Which site a shop's events belong to.
+ *
+ * Only when the shop has exactly one active site. Zero or several means the
+ * events stay unattributed rather than being guessed at: a site token
+ * identifies the shop, never which of its storefronts sent them, and guessing
+ * would put one site's health on another.
+ *
+ * Extracted and exported so it can be tested without a database. It is the only
+ * new decision in this file; the rest is transport.
+ */
+export function singleSiteId(sites) {
+  return Array.isArray(sites) && sites.length === 1 ? sites[0].id : null;
+}
+
 eventsRoutes.post('/', async (c) => {
   const shopId = shopIdOf(c)
+
+  // Attribute to the shop's site so the console can group by site rather than
+  // inferring it. A site token identifies the shop, so this is a lookup, never a
+  // client claim. Shops with more than one site stay unattributed rather than
+  // being guessed at — a site token cannot say which of them it is, and
+  // guessing would put one shop's health on the wrong storefront.
+  //
+  // Lazy and memoised because health validation needs it before any row is
+  // accepted, and a batch of page views should not pay for a lookup it never
+  // uses. One round trip either way.
+  let siteIdPromise = null
+  const resolveSiteId = () => {
+    siteIdPromise ??= (async () => {
+      const { data: sites } = await supabase
+        .from('sites')
+        .select('id')
+        .eq('shop_id', shopId)
+        .eq('active', true);
+      return singleSiteId(sites);
+    })();
+    return siteIdPromise;
+  }
 
   let body
   try {
@@ -149,10 +197,11 @@ eventsRoutes.post('/', async (c) => {
     const { name, properties, path, occurred_at: at, visitor_id, session_id } = parsed.data
 
     // health events must name the resource they are about, otherwise the console
-    // cannot tell which part of the site is broken
+    // cannot tell which part of the site is broken — and they must name one the
+    // site actually declared, so the console never gains a bar it cannot light
     if (name === 'health_ok' || name === 'health_fail') {
       const res = properties?.resource;
-      const known = res ? await isHealthResource(res) : false;
+      const known = res ? await isHealthResource(res, await resolveSiteId()) : false;
       if (!known) {
         rejected.push({ name, reason: 'health events need a valid resource' });
         continue;
@@ -186,17 +235,9 @@ eventsRoutes.post('/', async (c) => {
     return c.json({ error: 'No valid events', rejected }, 400)
   }
 
-  // Attribute to the shop's site so the console can group by site rather than
-  // inferring it. A site token identifies the shop, so this is a lookup, never a
-  // client claim. Shops with more than one site stay unattributed rather than
-  // being guessed at — a site token cannot say which of them it is, and
-  // guessing would put one shop's health on the wrong storefront.
-  const { data: sites } = await supabase
-    .from('sites')
-    .select('id')
-    .eq('shop_id', shopId)
-    .eq('active', true);
-  const siteId = sites && sites.length === 1 ? sites[0].id : null;
+  // Reuses the memoised lookup, so a batch that contained a health event has
+  // already paid for it and does not query twice.
+  const siteId = await resolveSiteId()
 
   const stamped = rows.map((r) => ({ ...r, site_id: siteId }));
 
