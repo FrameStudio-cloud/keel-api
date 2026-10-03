@@ -34,10 +34,16 @@ vi.mock('./db.js', () => ({
   },
 }))
 
-const { siteAuth, shopIdOf } = await import('./auth.js')
+const { siteAuth, shopIdOf, siteIdOf } = await import('./auth.js')
 
 const SHOP_A = 'a24f64a5-cd51-4bce-b31b-76fc73355c16'
 const SHOP_B = '11111111-2222-3333-4444-555555555555'
+
+// Storefronts within shop A, and a second shop, so "two sites on one shop" is a
+// state the fixtures can express.
+const SITE_A1 = '22222222-3333-4444-5555-666666666666'
+const SITE_A2 = '22222222-3333-4444-5555-777777777777'
+const SITE_B1 = '33333333-4444-5555-6666-777777777777'
 
 /** A minimal Hono-shaped context. Only what siteAuth actually touches. */
 function ctx({ method = 'GET', path = '/api/shop', headers = {}, query = {}, store = new Map() }) {
@@ -65,8 +71,11 @@ async function run(c) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // Default: a read token for shop A. Individual tests override.
-  resolveSiteToken.mockResolvedValue({ data: { shop_id: SHOP_A, can_write: false }, error: null })
+  // Default: a read token for shop A's one storefront. Individual tests override.
+  resolveSiteToken.mockResolvedValue({
+    data: { shop_id: SHOP_A, site_id: SITE_A1, can_write: false },
+    error: null,
+  })
   touchSiteToken.mockResolvedValue({ data: null, error: null })
 })
 
@@ -313,5 +322,66 @@ describe('shopIdOf', () => {
 
   it('throws rather than returning undefined when siteAuth was not mounted', () => {
     expect(() => shopIdOf(ctx({}))).toThrow(/shopId missing/)
+  })
+})
+
+describe('siteIdOf', () => {
+  it('surfaces the storefront the token was issued for', async () => {
+    // This is what lets one shop run two storefronts without either losing its
+    // health: the token names its own site, so nothing has to be guessed.
+    resolveSiteToken.mockResolvedValue({
+      data: { shop_id: SHOP_A, site_id: SITE_A2, can_write: false },
+      error: null,
+    })
+    const c = ctx({ headers: { 'x-keel-site-token': 'read-a' } })
+    await run(c)
+
+    expect(siteIdOf(c)).toBe(SITE_A2)
+  })
+
+  it('returns null for a shop-level token instead of throwing', async () => {
+    // shop_id null site_id is a supported state, not a broken one. Throwing here
+    // would turn every shop-level token into a 500 on the routes that accept it.
+    resolveSiteToken.mockResolvedValue({
+      data: { shop_id: SHOP_A, site_id: null, can_write: false },
+      error: null,
+    })
+    const c = ctx({ headers: { 'x-keel-site-token': 'shop-level' } })
+    const { reachedNext } = await run(c)
+
+    expect(reachedNext).toBe(true)
+    expect(siteIdOf(c)).toBeNull()
+    // The shop is still known, which is the point.
+    expect(shopIdOf(c)).toBe(SHOP_A)
+  })
+
+  it('treats a missing site_id column as null rather than undefined', async () => {
+    // A pre-migration row has no site_id at all. `?? null` keeps the accessor's
+    // return type honest instead of leaking undefined into a stamped column.
+    resolveSiteToken.mockResolvedValue({
+      data: { shop_id: SHOP_A, can_write: false },
+      error: null,
+    })
+    const c = ctx({ headers: { 'x-keel-site-token': 'legacy' } })
+    await run(c)
+
+    expect(siteIdOf(c)).toBeNull()
+  })
+
+  it('never reads a client-supplied site_id', async () => {
+    // Same guarantee as shopIdOf. A client cannot choose which storefront its
+    // events are attributed to.
+    resolveSiteToken.mockResolvedValue({
+      data: { shop_id: SHOP_A, site_id: SITE_A1, can_write: false },
+      error: null,
+    })
+    const c = ctx({
+      headers: { 'x-keel-site-token': 'read-a' },
+      query: { site_id: SITE_A2 },
+    })
+    await run(c)
+
+    expect(siteIdOf(c)).toBe(SITE_A1)
+    expect(siteIdOf(c)).not.toBe(SITE_A2)
   })
 })

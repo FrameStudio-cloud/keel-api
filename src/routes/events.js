@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../db.js'
-import { shopIdOf } from '../auth.js'
+import { shopIdOf, siteIdOf } from '../auth.js'
 import { identityId } from '../identity.js'
 
 export const eventsRoutes = new Hono()
@@ -138,38 +138,66 @@ const eventSchema = z.object({
  * Which site a shop's events belong to.
  *
  * Only when the shop has exactly one active site. Zero or several means the
- * events stay unattributed rather than being guessed at: a site token
- * identifies the shop, never which of its storefronts sent them, and guessing
- * would put one site's health on another.
+ * events stay unattributed rather than being guessed at: guessing would put one
+ * site's health on another.
  *
- * Extracted and exported so it can be tested without a database. It is the only
- * new decision in this file; the rest is transport.
+ * This is now the FALLBACK. A token issued for a storefront names its own
+ * site_id, which the events route prefers and which is why a shop can run two
+ * storefronts without either losing its health. This path only runs for
+ * shop-level tokens, which predate per-site tokens.
+ *
+ * Extracted and exported so it can be tested without a database.
  */
 export function singleSiteId(sites) {
-  return Array.isArray(sites) && sites.length === 1 ? sites[0].id : null;
+  return Array.isArray(sites) && sites.length === 1 ? sites[0].id : null
+}
+
+/**
+ * Which storefront an event batch belongs to.
+ *
+ * Precedence is the whole point: a token issued for a storefront names its own
+ * site, so it always wins. The single-active-site lookup is only consulted for a
+ * shop-level token, which predates per-site tokens and cannot say which storefront
+ * it is.
+ *
+ * That ordering is why a shop can run two storefronts without either losing its
+ * health. Inverting it - or applying the lookup even when the token knows better -
+ * would put one site's events on the other's dashboard.
+ *
+ * Pure, so the precedence can be tested without a database.
+ */
+export function attributedSiteId(tokenSiteId, sites) {
+  return tokenSiteId || singleSiteId(sites)
 }
 
 eventsRoutes.post('/', async (c) => {
   const shopId = shopIdOf(c)
 
-  // Attribute to the shop's site so the console can group by site rather than
-  // inferring it. A site token identifies the shop, so this is a lookup, never a
-  // client claim. Shops with more than one site stay unattributed rather than
-  // being guessed at — a site token cannot say which of them it is, and
-  // guessing would put one shop's health on the wrong storefront.
+  // Which storefront these events belong to.
+  //
+  // The token says, and it is server-resolved from the token row, so it is never a
+  // client claim. Two storefronts on one shop therefore each report their own
+  // health instead of both going dark.
+  //
+  // A shop-level token has no site, so we fall back to the old single-active-site
+  // lookup and otherwise leave events unattributed rather than guessing.
   //
   // Lazy and memoised because health validation needs it before any row is
   // accepted, and a batch of page views should not pay for a lookup it never
-  // uses. One round trip either way.
+  // uses. One round trip either way - and none at all for a site-scoped token.
   let siteIdPromise = null
   const resolveSiteId = () => {
+    const fromToken = siteIdOf(c)
+    // Short-circuit before the query: a site-scoped token already knows, and this
+    // keeps a batch of page views off the sites table entirely.
+    if (fromToken) return Promise.resolve(attributedSiteId(fromToken, null))
     siteIdPromise ??= (async () => {
       const { data: sites } = await supabase
         .from('sites')
         .select('id')
         .eq('shop_id', shopId)
         .eq('active', true);
-      return singleSiteId(sites);
+      return attributedSiteId(null, sites);
     })();
     return siteIdPromise;
   }

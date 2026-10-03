@@ -55,7 +55,13 @@ async function resolveByToken(token) {
   }
   const row = Array.isArray(data) ? data[0] : data
   if (!row) return null
-  return { shopId: row.shop_id, canWrite: row.can_write === true }
+  // siteId is null for a shop-level token. That is not an error: those still work,
+  // they just leave attribution to the single-active-site fallback in events.js.
+  return {
+    shopId: row.shop_id,
+    siteId: row.site_id ?? null,
+    canWrite: row.can_write === true,
+  }
 }
 
 /**
@@ -135,6 +141,7 @@ export function siteAuth({
     }
 
     c.set('shopId', identity.shopId)
+    c.set('siteId', identity.siteId)
     c.set('canWrite', identity.canWrite)
     c.set('viaToken', true)
 
@@ -157,4 +164,18 @@ export function shopIdOf(c) {
   const id = c.get('shopId')
   if (!id) throw new Error('shopId missing from context — is siteAuth() mounted?')
   return id
+}
+
+/**
+ * Which storefront presented the token, or null.
+ *
+ * Deliberately does NOT throw when absent, unlike shopIdOf. A null siteId is a
+ * legitimate state meaning "shop-level token" - the shop is still known, only the
+ * storefront is not. Throwing here would turn a supported configuration into a 500
+ * on the routes that accept it.
+ *
+ * Server-resolved from the token, so it is never a client claim.
+ */
+export function siteIdOf(c) {
+  return c.get('siteId') ?? null
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { singleSiteId } from "./events.js";
+import { singleSiteId, attributedSiteId } from "./events.js";
 
 /**
  * Site attribution, which health validation now depends on.
@@ -40,5 +40,53 @@ describe("singleSiteId", () => {
   it("returns the id rather than the row", () => {
     expect(singleSiteId([{ id: A, name: "kf", active: true }])).toBe(A);
     expect(singleSiteId([{ id: A }])).not.toBe(undefined);
+  });
+});
+
+/**
+ * Precedence, since 20261004. This is the change that lets one shop run two
+ * storefronts: a token issued for a storefront names its own site, so kikoi and
+ * PowerSec on the same shop each report their own health instead of both going
+ * dark.
+ */
+describe("attributedSiteId", () => {
+  const KIKOI = "2f9af0c3-a127-44e1-b942-3eb520656f6e";
+  const POWERSEC = "8a1c0000-1111-2222-3333-444444444444";
+
+  it("prefers the token's own site over the single-active-site lookup", () => {
+    // The token is for PowerSec, but the lookup would return kikoi - the shop's
+    // other storefront. The token must win, or PowerSec's health lands on kikoi's
+    // dashboard and both appear broken.
+    expect(attributedSiteId(POWERSEC, [{ id: KIKOI }])).toBe(POWERSEC);
+  });
+
+  it("prefers the token's site even when the shop has several active sites", () => {
+    // Before per-site tokens this was the unattributable case: two active sites
+    // meant no site_id at all, and both storefronts lost their health.
+    expect(attributedSiteId(POWERSEC, [{ id: KIKOI }, { id: POWERSEC }])).toBe(
+      POWERSEC
+    );
+  });
+
+  it("falls back to the lookup for a shop-level token", () => {
+    expect(attributedSiteId(null, [{ id: KIKOI }])).toBe(KIKOI);
+  });
+
+  it("leaves events unattributed rather than guessing", () => {
+    // No token site and several active sites: guessing would put one storefront's
+    // health on another, so it stays null.
+    expect(attributedSiteId(null, [{ id: KIKOI }, { id: POWERSEC }])).toBeNull();
+  });
+
+  it("is not confused by an empty-string site id", () => {
+    // "" is falsy, so it falls through to the lookup instead of stamping a blank
+    // site_id onto real events.
+    expect(attributedSiteId("", [{ id: KIKOI }])).toBe(KIKOI);
+    expect(attributedSiteId("", null)).toBeNull();
+  });
+
+  it("never returns undefined", () => {
+    expect(attributedSiteId(null, undefined)).toBeNull();
+    expect(attributedSiteId(undefined, null)).toBeNull();
   });
 });
