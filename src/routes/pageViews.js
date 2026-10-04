@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { supabase } from '../db.js'
-import { shopIdOf } from '../auth.js'
+import { shopIdOf, siteIdOf } from '../auth.js'
 import { identityId } from '../identity.js'
 
 export const pageViewsRoutes = new Hono()
@@ -136,6 +136,15 @@ pageViewsRoutes.post('/', async (c) => {
 
   const { error } = await supabase.from('page_views').insert({
     shop_id: shopId,
+    // Which storefront, from the token. Server-resolved, so never a client claim.
+    //
+    // NO fallback lookup here, unlike the events route. Page views are the highest
+    // volume write on the system, and an extra round trip per view to attribute a
+    // legacy shop-level token is a bad trade: it would tax every visitor to improve
+    // a number nobody has asked to split yet. A null here is honest - it means "a
+    // shop-level token" - and the events route keeps the fallback where health
+    // genuinely depends on it.
+    site_id: siteIdOf(c),
     page,
     product_name: product_name || null,
     referrer: sourceFromReferrer(rawReferrer, selfHost),
