@@ -1,0 +1,62 @@
+# Documentation of the live keel-api service. NOT a control surface.
+#
+# ⚠️ READ THIS BEFORE USING THE FILE.
+#
+# The running service was created in the Render dashboard, not from this
+# blueprint. A render.yaml only MANAGES services that were created from it.
+# Converting the existing service to a Blueprint RECREATES it and assigns a NEW
+# hostname — which breaks the default `apiBase` hardcoded in
+# @framestudio/keel-analytics (index.js:452), i.e. analytics on every site.
+#
+# So this file exists to do two things:
+#   1. Record what the service must look like, so a rebuild or a second
+#      environment is reproducible.
+#   2. Stop anyone (including a future me) from having to infer the host from a
+#      client default again.
+#
+# The Render dashboard remains the source of truth for the running service.
+# Values marked CONFIRM have not yet been verified against it.
+
+services:
+  - type: web
+    name: keel-api
+    runtime: node
+
+    # CONFIRM: free sleeps after idle (10–30s cold start). That is why kikoi has
+    # a retry budget, why the embed script must never be served from here, and
+    # why webhooks are unreliable until this is a paid always-on instance.
+    plan: free
+
+    # CONFIRM: region. Frankfurt is the closest to Nairobi.
+    # region: frankfurt
+
+    buildCommand: npm ci
+    startCommand: npm start
+
+    # GET / answers {ok, name, version}. It is the only honest proof that a
+    # deploy landed, because it names the build.
+    healthCheckPath: /
+
+    # CONFIRM: auto-deploy on push to the production branch.
+    autoDeploy: true
+
+    envVars:
+      # RENDER_GIT_COMMIT is injected by Render and reported by GET / as
+      # `version`. PORT is assigned by Render and must NOT be pinned here.
+      - key: SUPABASE_URL
+        sync: false
+
+      # service_role — bypasses RLS entirely, so every tenant filter is
+      # application code. See AGENTS.md, "The rule this file will not break".
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # Browser origins allowed to call the API. UNSET MEANS `*` — the code
+      # fails open. CONFIRM the current value before changing it.
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # Gates POST /api/chat/answer and POST /api/content/captions. Both answer
+      # 500 {"error":"GROQ_API_KEY not configured"} when it is absent.
+      - key: GROQ_API_KEY
+        sync: false

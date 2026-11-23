@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { supabase } from '../db.js'
-import { shopIdOf } from '../auth.js'
+import { shopIdOf, rateLimit } from '../auth.js'
+import { groqChat } from '../groq.js'
 
 export const contentRoutes = new Hono()
 
@@ -131,6 +132,13 @@ contentRoutes.post('/captions', async (c) => {
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) return c.json({ error: 'GROQ_API_KEY not configured' }, 500)
 
+  // Same budget as /chat/answer, on the same key: an LLM call is spend, and the
+  // site token that reaches it is public. Per shop, so a token rotation does not
+  // hand out a fresh allowance.
+  if (!rateLimit(`llm:${shopId}`, 20, 60_000)) {
+    return c.json({ error: 'Too many requests. Try again in a minute.' }, 429)
+  }
+
   const { data: settings } = await supabase
     .from('store_settings')
     .select('store_name, whatsapp')
@@ -173,32 +181,15 @@ Respond with valid JSON only (no markdown, no code fences):
 Keep each caption under 280 characters. Make them engaging and shoppable. Do NOT use emojis unless the tone is casual.`
 
   try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'mixtral-8x7b-32768',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Write 3 Instagram captions for: ${productList}` },
-        ],
-        temperature: 0.8,
-        max_tokens: 2048,
-      }),
+    const { content } = await groqChat({
+      apiKey,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Write 3 Instagram captions for: ${productList}` },
+      ],
+      temperature: 0.8,
+      maxTokens: 2048,
     })
-
-    if (!response.ok) {
-      const err = await response.text()
-      console.error('Groq API error:', err)
-      return c.json({ error: 'AI service error' }, 502)
-    }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-    if (!content) return c.json({ error: 'Empty AI response' }, 502)
 
     let parsed
     try {
@@ -215,7 +206,10 @@ Keep each caption under 280 characters. Make them engaging and shoppable. Do NOT
 
     return c.json(parsed)
   } catch (err) {
-    console.error('Caption generation error:', err)
-    return c.json({ error: 'Internal server error' }, 500)
+    // 502, not 500: the failure is upstream (every model in the chain refused or
+    // returned nothing), and the detail is logged rather than returned - the
+    // caller cannot act on a model name either.
+    console.error('Caption generation error:', err.message)
+    return c.json({ error: 'AI service error' }, 502)
   }
 })

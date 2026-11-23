@@ -20,7 +20,12 @@ jobs:
         run: |
           npm start &
           sleep 3
-          curl -sf http://localhost:3001 | grep -q '"ok":true'
+          # `version` proves the process booted THIS commit, not merely that
+          # something is listening. GET / carried no version until 2026-11-24,
+          # which is how this repo came to document deploys that never happened.
+          curl -sf http://localhost:3001 > /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"version"' /tmp/health.json
         shell: bash
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

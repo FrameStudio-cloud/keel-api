@@ -4,6 +4,24 @@ import { shopIdOf } from '../auth.js'
 
 export const pageContentRoutes = new Hono()
 
+/**
+ * What a storefront may see of a content section.
+ *
+ * `select('*')` was here. `content` is the jsonb block the site renders, so the
+ * table's shape is the copy itself — but the rule still applies: a future
+ * `internal_notes` or `published_by` column must not appear on a public site
+ * because nobody reviewed a wildcard. `shop_id` is omitted for the same reason
+ * as everywhere else: the token names the shop.
+ */
+const PUBLIC_PAGE_CONTENT_COLUMNS = [
+  'id',
+  'page_key',
+  'section_key',
+  'content',
+  'created_at',
+  'updated_at',
+]
+
 pageContentRoutes.get('/', async (c) => {
   const shopId = shopIdOf(c)
 
@@ -12,7 +30,7 @@ pageContentRoutes.get('/', async (c) => {
 
   let query = supabase
     .from('page_content')
-    .select('*')
+    .select(PUBLIC_PAGE_CONTENT_COLUMNS.join(','))
     .eq('shop_id', shopId)
 
   if (page) {

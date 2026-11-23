@@ -23,6 +23,18 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .map((s) => s.trim())
   .filter(Boolean)
 
+// Failing open is the only workable default here — a new storefront must not
+// need a deploy of this service to be allowed to call it — but silently failing
+// open is how the policy became `*` without anyone deciding that. Say it at
+// boot. Identity still comes from the site token, scoped to one shop, so this is
+// defence in depth rather than access control.
+if (!allowedOrigins.length) {
+  console.warn(
+    '[keel-api] ALLOWED_ORIGINS is unset — accepting browser requests from ANY origin. ' +
+      'Set it to the real storefront hosts.'
+  )
+}
+
 app.use(
   '*',
   cors({
@@ -35,7 +47,29 @@ app.use(
   })
 )
 
-app.get('/', (c) => c.json({ ok: true, name: 'keel-api' }))
+/**
+ * Health + identity, including WHICH BUILD is answering.
+ *
+ * `version` is the point, not decoration. Until 24 Nov 2026 this answered
+ * `{ok, name}` and nothing else, so the deployed commit could not be confirmed
+ * from outside the Render dashboard — and this repo has a documented history of
+ * features recorded as shipped that were never deployed. A health check that
+ * cannot distinguish one build from another is not a health check.
+ *
+ * RENDER_GIT_COMMIT is injected by Render. npm_package_version covers a local
+ * `npm start`. 'dev' is the honest answer when neither exists: a fabricated
+ * version is worse than none, because it ends the search.
+ */
+app.get('/', (c) =>
+  c.json({
+    ok: true,
+    name: 'keel-api',
+    version:
+      process.env.RENDER_GIT_COMMIT ||
+      process.env.npm_package_version ||
+      'dev',
+  })
+)
 
 // Identity gate. Everything below runs with c.get('shopId') set to a shop the
 // caller is actually allowed to reach.

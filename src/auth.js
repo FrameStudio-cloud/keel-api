@@ -72,7 +72,14 @@ async function resolveByToken(token) {
  */
 const buckets = new Map()
 
-function rateLimit(key, max, windowMs) {
+/**
+ * Exported because the Groq routes budget per-request spend (an LLM call is the
+ * only thing on this API that costs money per request) and should use this
+ * limiter rather than grow a second implementation of the same window.
+ *
+ * Reminder: in-memory, therefore per replica. See AGENTS.md, "Rate limiting".
+ */
+export function rateLimit(key, max, windowMs) {
   const now = Date.now()
   const b = buckets.get(key)
   if (!b || now - b.start > windowMs) {

@@ -158,12 +158,20 @@ npm test          # vitest run
 node scripts/mutate.mjs
 ```
 
-**`src/auth.test.js`** (24) and **`src/routes/tenantIsolation.test.js`** (24) are
+**`src/auth.test.js`** (28) and **`src/routes/tenantIsolation.test.js`** (26) are
 the security tests. They existed for neither before 30 Sep 2026, which is why all
 of the above shipped.
 
+Three more guard what the 24 Nov 2026 hygiene pass changed:
+`src/routes/publicColumns.test.js` (20) asserts that the five routes which used
+`select('*')` no longer do and still filter by the token shop;
+`src/routes/chatAnswer.test.js` (5) proves the answer route builds its prompt from
+the token rather than `body.shopContext`, and that the LLM budget is per shop;
+`src/groq.test.js` (17) covers the model chain, the fall-through, and
+`<think>` stripping.
+
 `scripts/mutate.mjs` reintroduces each fixed bug and asserts the suite goes red —
-**12 mutations, all caught.** A guard that has never been seen to fail is a
+**30 mutations, all caught.** A guard that has never been seen to fail is a
 comment, not a guard. Run it after touching auth or a route's filters.
 
 ---
@@ -183,13 +191,31 @@ comment, not a guard. Run it after touching auth or a route's filters.
 
 ## Hosting
 
-⚠️ **The repo cannot tell you.** The only hosting artefact is `railway.json`
-(NIXPACKS, `npm start`, 1 replica) from the initial July commit, never modified.
-There is no `render.yaml` or Dockerfile in any branch, and the string `render`
-appears nowhere in the source. The service is widely understood to run at
-`keel-api-37rh.onrender.com` — which matches the default `apiBase` in
-`@framestudio/keel-analytics` — but that is inference from a client default, not
-evidence. **Verify in the Render dashboard before documenting a host.**
+**Confirmed 24 Nov 2026:** `https://keel-api-37rh.onrender.com/` answers
+`200 {"ok":true,"name":"keel-api","version":"…"}`. It is Render. The hostname
+matches the default `apiBase` in `@framestudio/keel-analytics`
+(`index.js:452`), so anything that changes it breaks analytics on every site.
+
+`GET /` now reports **`version`** — `RENDER_GIT_COMMIT`, falling back to
+`npm_package_version`, then `'dev'`. Before this it answered `{ok, name}` only,
+which meant the deployed commit could not be confirmed without opening the
+dashboard. CI asserts the field exists.
+
+⚠️ **`render.yaml` documents the service; it does not manage it.** The service
+was created in the Render dashboard. A blueprint only manages services created
+from it, and **converting the existing one recreates it with a new hostname** —
+which breaks the analytics `apiBase` above. Do not convert. If a rebuild is ever
+needed, create it fresh from `render.yaml` and update every site's `apiBase`
+deliberately, as one change.
+
+⚠️ **`railway.json` is stale** and describes a host that is not in use
+(NIXPACKS, `npm start`, `numReplicas: 1`). Its replica claim is *not* a fact
+about the live service — do not reason from it. It is kept only because deleting
+it is not this file's decision.
+
+**Still unverified — confirm in the dashboard before relying on it:** plan
+(free vs starter), region, deployed branch, auto-deploy, and the currently
+running commit. The `CONFIRM:` comments in `render.yaml` mark each one.
 
 ## Coverage gaps, stated plainly
 

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { supabase } from '../db.js'
-import { shopIdOf } from '../auth.js'
+import { shopIdOf, rateLimit } from '../auth.js'
+import { groqChat } from '../groq.js'
 
 export const chatRoutes = new Hono()
 
@@ -27,6 +28,24 @@ const PUBLIC_CHAT_CONFIG = [
   'whatsapp_bot_number',
 ]
 
+const PUBLIC_FAQ_COLUMNS = ['id', 'question', 'answer', 'sort_order', 'created_at']
+
+/**
+ * `chat_messages` is the wildcard that actually mattered: it carries
+ * `customer_name`, and any future `customer_phone` or `customer_email` column
+ * would have been published to every storefront with no code change to review.
+ * `shop_id` is omitted — the token already names the shop.
+ */
+const PUBLIC_MESSAGE_COLUMNS = [
+  'id',
+  'question',
+  'answer',
+  'status',
+  'customer_name',
+  'feedback',
+  'created_at',
+]
+
 chatRoutes.get('/config', async (c) => {
   const shopId = shopIdOf(c)
 
@@ -45,7 +64,7 @@ chatRoutes.get('/faqs', async (c) => {
 
   const { data, error } = await supabase
     .from('chat_faqs')
-    .select('*')
+    .select(PUBLIC_FAQ_COLUMNS.join(','))
     .eq('shop_id', shopId)
     .order('sort_order', { ascending: true })
     .limit(200)
@@ -67,7 +86,7 @@ chatRoutes.get('/messages', async (c) => {
 
   const { data, error } = await supabase
     .from('chat_messages')
-    .select('*')
+    .select(PUBLIC_MESSAGE_COLUMNS.join(','))
     .in('id', idList)
     // The filter that was missing. Without it this route resolved whichever shop
     // the caller authenticated as, then returned messages for every shop whose id
@@ -103,31 +122,101 @@ chatRoutes.post('/callbacks', async (c) => {
   return c.json({ ok: true })
 })
 
+const DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
+/**
+ * A day with no hours is OMITTED, never printed as "Closed".
+ *
+ * A shop that never configured Tuesday has not told us it is closed on Tuesday.
+ * Same rule the Telegram bot follows — a bot that guesses the timetable is a bot
+ * that tells a customer the shop is open at 3am.
+ */
+function hoursLine(businessHours) {
+  if (!businessHours || typeof businessHours !== 'object') return 'not published'
+  const parts = DAY_ORDER.filter((d) => businessHours[d]?.active).map(
+    (d) => `${d.toUpperCase()} ${businessHours[d].open}–${businessHours[d].close}`
+  )
+  return parts.length ? parts.join(' · ') : 'not published'
+}
+
+/**
+ * Shop facts for a widget answer, built from the TOKEN's shop.
+ *
+ * This route used to build its prompt from `body.shopContext`. No database was
+ * read, so it was never a tenant leak — but it did make the route an open LLM
+ * proxy: a site token ships in a storefront's public JS, so anyone holding one
+ * could send arbitrary context and spend Keel's Groq budget on it. Context now
+ * comes from the shop the token names, and nothing else.
+ */
+async function shopContextFor(shopId) {
+  const [{ data: shop }, { data: settings }, products, faqs] = await Promise.all([
+    supabase.from('shops').select('name').eq('id', shopId).maybeSingle(),
+    supabase
+      .from('store_settings')
+      .select('store_name, store_address, whatsapp, business_hours')
+      .eq('shop_id', shopId)
+      .maybeSingle(),
+    supabase
+      .from('products')
+      .select('name, category, price, stock')
+      .eq('shop_id', shopId)
+      .order('name', { ascending: true })
+      .limit(40),
+    supabase
+      .from('chat_faqs')
+      .select('question, answer')
+      .eq('shop_id', shopId)
+      .order('sort_order', { ascending: true })
+      .limit(20),
+  ])
+
+  return {
+    shopName: settings?.store_name || shop?.name || 'the shop',
+    location: settings?.store_address || 'N/A',
+    hours: hoursLine(settings?.business_hours),
+    products: products?.data || [],
+    faqs: faqs?.data || [],
+  }
+}
+
 chatRoutes.post('/answer', async (c) => {
-  const { shopContext, question } = await c.req.json()
+  const shopId = shopIdOf(c)
+  const { question } = await c.req.json()
   if (!question) return c.json({ error: 'question is required' }, 400)
 
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) return c.json({ error: 'GROQ_API_KEY not configured' }, 500)
 
-  const productsBlock = shopContext?.products?.length
-    ? shopContext.products.map(p =>
-        `- ${p.name} (${p.category}) — Ksh ${p.price}${p.inStock ? '' : ' — OUT OF STOCK'}`
-      ).join('\n')
+  // An LLM call is the only thing on this API that costs money per request, and
+  // the credential that reaches it ships in public JS. Budgeted per SHOP, not
+  // per token, so rotating a token does not reset the allowance.
+  if (!rateLimit(`llm:${shopId}`, 20, 60_000)) {
+    return c.json({ error: 'Too many requests. Try again in a minute.' }, 429)
+  }
+
+  const ctx = await shopContextFor(shopId)
+
+  const productsBlock = ctx.products.length
+    ? ctx.products
+        .map(
+          (p) =>
+            `- ${p.name} (${p.category || 'uncategorised'}) — Ksh ${p.price}${
+              p.stock > 0 ? '' : ' — OUT OF STOCK'
+            }`
+        )
+        .join('\n')
     : 'No products available.'
 
-  const faqsBlock = shopContext?.faqs?.length
-    ? shopContext.faqs.map(f => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n')
+  const faqsBlock = ctx.faqs.length
+    ? ctx.faqs.map((f) => `Q: ${f.question}\nA: ${f.answer}`).join('\n\n')
     : 'No FAQs available.'
 
-  const systemPrompt = `You are a friendly Kenyan shop assistant for ${shopContext?.shopName || 'the shop'}. Answer customer questions based ONLY on the shop information provided below. Be conversational, use Kenyan English, and keep responses concise.
+  const systemPrompt = `You are a friendly Kenyan shop assistant for ${ctx.shopName}. Answer customer questions based ONLY on the shop information provided below. Be conversational, use Kenyan English, and keep responses concise.
 
 Shop Information:
-- Name: ${shopContext?.shopName || 'N/A'}
-- Description: ${shopContext?.description || 'N/A'}
-- Location: ${shopContext?.location || 'N/A'}
-- Hours: ${shopContext?.hours || 'N/A'}
-- Delivery: ${shopContext?.deliveryInfo || 'N/A'}
+- Name: ${ctx.shopName}
+- Location: ${ctx.location}
+- Hours: ${ctx.hours}
 
 Products Available:
 ${productsBlock}
@@ -145,45 +234,33 @@ Respond with valid JSON only (no markdown, no code fences):
 }`
 
   try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'mixtral-8x7b-32768',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: question },
-        ],
-        temperature: 0.7,
-        max_tokens: 1024,
-      }),
+    const { content } = await groqChat({
+      apiKey,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: String(question).slice(0, 1000) },
+      ],
+      temperature: 0.7,
+      maxTokens: 1024,
     })
-
-    if (!response.ok) {
-      const err = await response.text()
-      console.error('Groq API error:', err)
-      return c.json({ error: 'AI service error' }, 502)
-    }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-
-    if (!content) return c.json({ error: 'Empty AI response' }, 502)
 
     let parsed
     try {
       parsed = JSON.parse(content)
     } catch {
-      parsed = { answer: content, outOfStockProduct: null, suggestedAlternative: null, orderReady: false, orderItems: null }
+      parsed = {
+        answer: content,
+        outOfStockProduct: null,
+        suggestedAlternative: null,
+        orderReady: false,
+        orderItems: null,
+      }
     }
 
     return c.json(parsed)
   } catch (err) {
-    console.error('Chat answer error:', err)
-    return c.json({ error: 'Internal server error' }, 500)
+    console.error('[chat/answer]', err.message)
+    return c.json({ error: 'AI service error' }, 502)
   }
 })
 

@@ -5,6 +5,38 @@ import { shopIdOf } from '../auth.js'
 export const catalogueRoutes = new Hono()
 
 /**
+ * What a storefront may see of a catalogue row.
+ *
+ * `select('*')` was here. Every column on this table is product display data
+ * today, which is precisely the argument that ages badly: the rule is that a new
+ * column is a decision, not something a wildcard publishes the moment somebody
+ * adds it. `shop_id` is omitted — the token already names the shop, and echoing
+ * it implies a multi-tenant response that never exists.
+ */
+const PUBLIC_CATALOGUE_COLUMNS = [
+  'id',
+  'name',
+  'type',
+  'category',
+  'price',
+  'price_label',
+  'description',
+  'image',
+  'available',
+  'featured',
+  'variants',
+  'specs',
+  'includes',
+  'new_arrival',
+  'sale_price',
+  'sale_ends_at',
+  'badge',
+  'badge_ends_at',
+  'product_id',
+  'created_at',
+]
+
+/**
  * Postgres uuid, exactly. Used to gate anything that gets interpolated into a
  * PostgREST filter string.
  */
@@ -37,7 +69,7 @@ catalogueRoutes.get('/', async (c) => {
 
   let query = supabase
     .from('catalogue')
-    .select('*')
+    .select(PUBLIC_CATALOGUE_COLUMNS.join(','))
     .eq('shop_id', shopId)
 
   if (id) query = query.or(`id.eq.${id},product_id.eq.${id}`)

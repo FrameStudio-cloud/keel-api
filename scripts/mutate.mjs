@@ -24,6 +24,20 @@ const MUTATIONS = [
   ['src/routes/pageContent.js', /\.is\('page_key', null\)/, '', 'page-content: legacy rows leak into sections'],
   ['src/routes/pageContent.js', /if \(page\) \{/, 'if (false) {', 'page-content: page addressing removed'],
   ['src/routes/pageContent.js', /return c\.json\(\[\]\)/, "return supabase.from('page_content').select('*').eq('shop_id', shopId).limit(5).then(r => r.data || [])", 'page-content: unaddressed read becomes a dump'],
+
+  // Added 24 Nov 2026 with Phase 1 of the custom-site-integration plan. Each of
+  // these is a guard that did not exist before that day, so the suite had never
+  // been seen to fail on it.
+  ['src/routes/banners.js', /\.select\(PUBLIC_BANNER_COLUMNS\.join\(','\)\)/, ".select('*')", 'banners: select(*)'],
+  ['src/routes/catalogue.js', /\.select\(PUBLIC_CATALOGUE_COLUMNS\.join\(','\)\)/, ".select('*')", 'catalogue: select(*)'],
+  ['src/routes/pageContent.js', /\.select\(PUBLIC_PAGE_CONTENT_COLUMNS\.join\(','\)\)/, ".select('*')", 'page-content: select(*)'],
+  ['src/routes/chat.js', /\.select\(PUBLIC_FAQ_COLUMNS\.join\(','\)\)/, ".select('*')", 'chat faqs: select(*)'],
+  ['src/routes/chat.js', /\.select\(PUBLIC_MESSAGE_COLUMNS\.join\(','\)\)/, ".select('*')", 'chat messages: select(*)'],
+  ['src/routes/chat.js', /if \(!rateLimit\(`llm:\$\{shopId\}`, 20, 60_000\)\) \{/, 'if (false) {', 'chat answer: LLM budget removed'],
+  ['src/routes/chat.js', /\.select\('name, category, price, stock'\)\s*\n\s*\.eq\('shop_id', shopId\)/, ".select('name, category, price, stock')", 'chat answer: context not shop-scoped'],
+  ['src/groq.js', /\.eq\('key', 'ai_model_chain'\)/, ".eq('key', 'a_different_key')", 'groq: chain read from the wrong key'],
+  ['src/groq.js', /if \(!\/<think\/i\.test\(raw\)\) return raw/, 'return raw', 'groq: reasoning not stripped'],
+  ['src/groq.js', /console\.error\('\[groq\]', lastError, detail\)\n\s*continue/, "console.error('[groq]', lastError, detail); break", 'groq: retired model stops the chain'],
 ]
 
 let caught = 0
