@@ -3,9 +3,11 @@ import { supabase } from './db.js'
 /**
  * Which Groq models a route may use, and the call itself.
  *
- * Two routes here hardcoded `'mixtral-8x7b-32768'`: POST /api/chat/answer and
- * POST /api/content/captions. Groq retired that model, so both answered 502 for
- * every caller — and nothing in the product said so, because a 502 from a model
+ * A route here hardcoded `'mixtral-8x7b-32768'`: POST /api/chat/answer. (And
+ * POST /api/content/captions did the same until it was removed on 24 Nov 2026 —
+ * an LLM on a public token was a budget hole, not a feature.) Groq retired that
+ * model, so the route answered 502 for every caller — with nothing in the
+ * product saying so, because a 502 from a model
  * name is indistinguishable from a 502 from the network.
  *
  * A model name in source is a scheduled outage. It works until the vendor

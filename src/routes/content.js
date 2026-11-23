@@ -1,9 +1,21 @@
 import { Hono } from 'hono'
 import { supabase } from '../db.js'
-import { shopIdOf, rateLimit } from '../auth.js'
-import { groqChat } from '../groq.js'
+import { shopIdOf } from '../auth.js'
 
 export const contentRoutes = new Hono()
+
+/**
+ * Content ideas for the marketing composer, and nothing else.
+ *
+ * POST /captions lived here until 24 Nov 2026. It generated Instagram captions
+ * with an LLM, reachable by a credential that ships in the storefront's public
+ * JavaScript — so any visitor could make Keel spend Groq money, and a rate limit
+ * was the only thing standing in the way of that. Writing captions is a dashboard
+ * job (the dashboard already does it through an edge function), no storefront
+ * called the route, and a storefront never needs to generate copy about its own
+ * products. Removed rather than scoped: a scope would have made an endpoint that
+ * should not exist on this API safe to have.
+ */
 
 contentRoutes.get('/ideas', async (c) => {
   const shopId = shopIdOf(c)
@@ -120,96 +132,4 @@ contentRoutes.get('/ideas', async (c) => {
   })
 
   return c.json(ideas.slice(0, 20))
-})
-
-contentRoutes.post('/captions', async (c) => {
-  const shopId = shopIdOf(c)
-  const { productNames, shopName, tone } = await c.req.json()
-  if (!productNames || productNames.length === 0) {
-    return c.json({ error: 'productNames is required' }, 400)
-  }
-
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey) return c.json({ error: 'GROQ_API_KEY not configured' }, 500)
-
-  // Same budget as /chat/answer, on the same key: an LLM call is spend, and the
-  // site token that reaches it is public. Per shop, so a token rotation does not
-  // hand out a fresh allowance.
-  if (!rateLimit(`llm:${shopId}`, 20, 60_000)) {
-    return c.json({ error: 'Too many requests. Try again in a minute.' }, 429)
-  }
-
-  const { data: settings } = await supabase
-    .from('store_settings')
-    .select('store_name, whatsapp')
-    // Token-derived, not body-derived. This used to read the caller's `shopId`
-    // from the request body, so a write-token holder could read another shop's
-    // store name and WhatsApp number and have them written into generated
-    // captions.
-    .eq('shop_id', shopId)
-    .maybeSingle()
-
-  const storeName = shopName || settings?.store_name || 'our shop'
-  const whatsapp = settings?.whatsapp || ''
-  const productList = productNames.join(', ')
-
-  const toneInstructions = {
-    professional: 'Write in a professional, polished tone. Suitable for a business Instagram page.',
-    casual: 'Write in a friendly, conversational Kenyan social media tone. Relaxed and relatable.',
-    urgent: 'Create urgency and FOMO. Focus on limited stock, time sensitivity, and act-now language.',
-  }
-
-  const toneGuide = toneInstructions[tone] || toneInstructions.casual
-
-  const systemPrompt = `You are a social media content writer for ${storeName}, a Kenyan shop. 
-Generate exactly 3 Instagram caption options for the following products: ${productList}.
-
-${toneGuide}
-
-For each caption option, also suggest 5-8 relevant hashtags.
-
-Respond with valid JSON only (no markdown, no code fences):
-{
-  "options": [
-    {
-      "text": "caption text here...",
-      "hashtags": "#hashtag1 #hashtag2 #hashtag3"
-    }
-  ]
-}
-
-Keep each caption under 280 characters. Make them engaging and shoppable. Do NOT use emojis unless the tone is casual.`
-
-  try {
-    const { content } = await groqChat({
-      apiKey,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Write 3 Instagram captions for: ${productList}` },
-      ],
-      temperature: 0.8,
-      maxTokens: 2048,
-    })
-
-    let parsed
-    try {
-      parsed = JSON.parse(content)
-    } catch {
-      parsed = {
-        options: [
-          { text: content, hashtags: '' },
-          { text: '', hashtags: '' },
-          { text: '', hashtags: '' },
-        ],
-      }
-    }
-
-    return c.json(parsed)
-  } catch (err) {
-    // 502, not 500: the failure is upstream (every model in the chain refused or
-    // returned nothing), and the detail is logged rather than returned - the
-    // caller cannot act on a model name either.
-    console.error('Caption generation error:', err.message)
-    return c.json({ error: 'AI service error' }, 502)
-  }
 })

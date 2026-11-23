@@ -74,6 +74,7 @@ const { bannersRoutes } = await import('./banners.js')
 const { catalogueRoutes } = await import('./catalogue.js')
 const { pageContentRoutes } = await import('./pageContent.js')
 const { chatRoutes } = await import('./chat.js')
+const { contentRoutes } = await import('./content.js')
 
 const SHOP_A = 'a24f64a5-cd51-4bce-b31b-76fc73355c16'
 
@@ -174,5 +175,30 @@ describe('every one of these routes is still scoped to the token', () => {
   ])('%s filters by the token shop', async (table, request) => {
     await request()
     expect(selectOf(table).filters.shop_id).toBe(SHOP_A)
+  })
+})
+
+describe('the removed captions route stays removed', () => {
+  // POST /captions wrote Instagram copy with an LLM on a credential that ships in
+  // the storefront's public JavaScript, so any visitor could spend Keel's Groq
+  // budget. No storefront ever called it. Pinned so restoring the endpoint is a
+  // decision somebody makes on purpose rather than a merge that quietly reopens
+  // the hole.
+  it('is a 404', async () => {
+    const app = new Hono()
+    app.use('*', async (c, next) => {
+      c.set('shopId', SHOP_A)
+      c.set('canWrite', true)
+      await next()
+    })
+    app.route('/api/content', contentRoutes)
+
+    const res = await app.request('/api/content/captions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productNames: ['Chair'] }),
+    })
+
+    expect(res.status).toBe(404)
   })
 })

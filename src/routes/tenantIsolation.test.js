@@ -71,7 +71,6 @@ vi.mock('../db.js', () => ({
 
 const { chatRoutes } = await import('./chat.js')
 const { settingsRoutes } = await import('./settings.js')
-const { contentRoutes } = await import('./content.js')
 const { manifestRoutes } = await import('./manifest.js')
 
 const SHOP_A = 'a24f64a5-cd51-4bce-b31b-76fc73355c16'
@@ -108,10 +107,8 @@ function mount(routes, prefix, { path = '/', shopId = SHOP_A, method = 'GET', bo
 beforeEach(() => {
   calls.length = 0
   nextResult = { data: [], error: null }
-  // The captions route returns 500 before it queries anything when this is
-  // unset, which reads as "the query was never made" rather than as a config
-  // problem.
-  process.env.GROQ_API_KEY = 'test-key'
+  // The manifest route fetches, and the stubbed response is what the SSRF tests
+  // assert was or was not called.
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) })))
 })
 
@@ -164,17 +161,6 @@ describe('POST routes derive shop_id from the token', () => {
     const rec = calls.find((c) => c.table === 'chat_stock_alerts')
     expect(rec).toBeDefined()
     expect(rec.payload.shop_id).toBe(SHOP_A)
-  })
-
-  it('reads store_settings by the token shop, not the body', async () => {
-    await mount(contentRoutes, '/api/content', {
-      path: '/captions',
-      method: 'POST',
-      body: { shopId: SHOP_B, productNames: ['Chair'] },
-    })
-    const rec = calls.find((c) => c.table === 'store_settings')
-    expect(rec).toBeDefined()
-    expect(rec.filters.shop_id).toBe(SHOP_A)
   })
 })
 

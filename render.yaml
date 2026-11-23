@@ -56,7 +56,7 @@ services:
       - key: ALLOWED_ORIGINS
         sync: false
 
-      # Gates POST /api/chat/answer and POST /api/content/captions. Both answer
-      # 500 {"error":"GROQ_API_KEY not configured"} when it is absent.
+      # Gates POST /api/chat/answer, which answers 500
+      # {"error":"GROQ_API_KEY not configured"} when it is absent.
       - key: GROQ_API_KEY
         sync: false
