@@ -38,6 +38,11 @@ const MUTATIONS = [
   ['src/groq.js', /\.eq\('key', 'ai_model_chain'\)/, ".eq('key', 'a_different_key')", 'groq: chain read from the wrong key'],
   ['src/groq.js', /if \(!\/<think\/i\.test\(raw\)\) return raw/, 'return raw', 'groq: reasoning not stripped'],
   ['src/groq.js', /console\.error\('\[groq\]', lastError, detail\)\n\s*continue/, "console.error('[groq]', lastError, detail); break", 'groq: retired model stops the chain'],
+
+  // Phase 3: scope enforcement.
+  ['src/auth.js', /if \(!identity\.scopes\.includes\(needed\)\) \{/, 'if (false) {', 'auth: scope not enforced'],
+  ['src/auth.js', /if \(needed === null\) \{/, 'if (false) {', 'auth: unmapped write allowed'],
+  ['src/auth.js', /\? \['read', 'analytics', 'inquiry'\]/, "? ['read']", 'auth: legacy fallback narrowed'],
 ]
 
 let caught = 0

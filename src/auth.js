@@ -35,6 +35,50 @@ import { supabase } from './db.js'
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 /**
+ * What each route is FOR.
+ *
+ * A token used to be one boolean, so a credential that ships in a storefront's
+ * public JavaScript could do everything this API can do — write fake analytics
+ * with a token issued for a catalogue, or spend an LLM budget with one issued
+ * for analytics. A scope makes the credential's purpose explicit, so a leak
+ * costs one capability instead of all of them.
+ *
+ * Reads need `read`. Every write is listed here, matched on the path.
+ */
+const SCOPE_RULES = [
+  [/^\/api\/events(\/|$)/, 'analytics'],
+  [/^\/api\/page-views(\/|$)/, 'analytics'],
+  [/^\/api\/chat\/callbacks(\/|$)/, 'inquiry'],
+  [/^\/api\/chat\/stock-alerts(\/|$)/, 'inquiry'],
+  // The assistant is a customer conversation answered on the shop's behalf, so it
+  // shares the customer-input scope. It has no caller today; if a public widget
+  // becomes real, give it its own scope and a monthly allowance rather than
+  // widening this one.
+  [/^\/api\/chat\/answer(\/|$)/, 'inquiry'],
+  [/^\/api\/inquiries(\/|$)/, 'inquiry'],
+  [/^\/api\/orders(\/|$)/, 'order'],
+]
+
+/**
+ * The scope a request needs, or null when no rule covers it.
+ *
+ * Exported so it can be tested without a database, and so a refusal can name the
+ * scope instead of saying "forbidden".
+ *
+ * A null return is a FAILURE, not a pass: an unmapped write must not be
+ * reachable by every write token just because somebody added a route and forgot
+ * to scope it. Failing closed here turns that into a 403 with a message saying
+ * what to edit, which is how the omission gets noticed.
+ */
+export function requiredScope(method, path) {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return 'read'
+  for (const [pattern, scope] of SCOPE_RULES) {
+    if (pattern.test(path)) return scope
+  }
+  return null
+}
+
+/**
  * The token is read from headers only.
  *
  * `?site_token=` used to be accepted, which is the reason a token ends up in
@@ -57,10 +101,22 @@ async function resolveByToken(token) {
   if (!row) return null
   // siteId is null for a shop-level token. That is not an error: those still work,
   // they just leave attribution to the single-active-site fallback in events.js.
+  //
+  // `scopes` arrived on 24 Nov 2026. Code deployed against a database that
+  // predates that migration gets no `scopes` at all, and an empty list would 403
+  // every read — so a missing value falls back to the legacy split rather than
+  // to nothing. Absent is not the same as empty.
+  const scopes = Array.isArray(row.scopes)
+    ? row.scopes
+    : row.can_write === true
+      ? ['read', 'analytics', 'inquiry']
+      : ['read']
+
   return {
     shopId: row.shop_id,
     siteId: row.site_id ?? null,
     canWrite: row.can_write === true,
+    scopes,
   }
 }
 
@@ -150,10 +206,30 @@ export function siteAuth({
     c.set('shopId', identity.shopId)
     c.set('siteId', identity.siteId)
     c.set('canWrite', identity.canWrite)
+    c.set('scopes', identity.scopes)
     c.set('viaToken', true)
 
     if (WRITE_METHODS.has(c.req.method) && !identity.canWrite) {
       return c.json({ error: 'This endpoint requires a write token' }, 403)
+    }
+
+    // Scope, not method. A token can be write-capable and still have no business
+    // at this particular route: the credential that files an inquiry is not the
+    // credential that creates an order, and neither is the one that reports a
+    // page view.
+    const needed = requiredScope(c.req.method, c.req.path)
+    if (needed === null) {
+      return c.json(
+        {
+          error:
+            'This endpoint has no scope rule, so a site token cannot write to it. ' +
+            'Add it to SCOPE_RULES in auth.js rather than widening a scope.',
+        },
+        403
+      )
+    }
+    if (!identity.scopes.includes(needed)) {
+      return c.json({ error: `This endpoint requires the ${needed} scope` }, 403)
     }
 
     // best-effort last-used stamp; never block the response on it

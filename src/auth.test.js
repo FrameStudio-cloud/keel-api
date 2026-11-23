@@ -177,6 +177,13 @@ describe('a token identifies exactly one shop', () => {
       const c = ctx({ method: 'POST', path: '/api/chat/callbacks', headers: { 'x-keel-site-token': 'w' }, store })
       const { response } = await run(c)
       expect(response.status, `can_write=${JSON.stringify(value)}`).toBe(403)
+      // The REASON, not just the status.
+      //
+      // Since scopes landed, a loosened can_write is still refused — by the
+      // scope check, one layer down. A test that only asserted 403 would keep
+      // passing with this guard removed, which is exactly what the mutation
+      // harness caught. Asserting the message keeps the two refusals distinct.
+      expect(response.body.error, `can_write=${JSON.stringify(value)}`).toMatch(/write token/)
     }
   })
 })
