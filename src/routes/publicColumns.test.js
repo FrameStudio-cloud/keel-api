@@ -75,6 +75,7 @@ const { catalogueRoutes } = await import('./catalogue.js')
 const { pageContentRoutes } = await import('./pageContent.js')
 const { chatRoutes } = await import('./chat.js')
 const { contentRoutes } = await import('./content.js')
+const { productRoutes } = await import('./products.js')
 
 const SHOP_A = 'a24f64a5-cd51-4bce-b31b-76fc73355c16'
 
@@ -128,6 +129,11 @@ describe.each([
       ),
     ['id', 'question', 'answer', 'status', 'customer_name'],
   ],
+  [
+    'products',
+    () => mount(() => productRoutes, '/api/products'),
+    ['id', 'name', 'category', 'price', 'stock', 'image'],
+  ],
 ])('%s names its columns', (table, request, required) => {
   it('is not a wildcard', async () => {
     await request()
@@ -175,6 +181,16 @@ describe('every one of these routes is still scoped to the token', () => {
   ])('%s filters by the token shop', async (table, request) => {
     await request()
     expect(selectOf(table).filters.shop_id).toBe(SHOP_A)
+  })
+})
+
+describe('the buying price never reaches a storefront', () => {
+  // Naming the columns stopped the wildcard; it did not stop a column that had no
+  // business being named. `cost_price` is what the shop PAID, so publishing it
+  // told anyone reading the site's JavaScript the margin on every product.
+  it('is absent from the product list', async () => {
+    await mount(() => productRoutes, '/api/products')
+    expect(selectOf('products').selected.split(',')).not.toContain('cost_price')
   })
 })
 

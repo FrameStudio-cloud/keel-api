@@ -50,6 +50,9 @@ const MUTATIONS = [
   ['src/routes/inquiries.js', /site_id: siteId,/, 'site_id: body.site_id,', 'inquiries: body site_id'],
   ['src/routes/inquiries.js', /status: 'new',/, 'status: body.status,', 'inquiries: body status'],
   ['src/routes/inquiries.js', /if \(!rateLimit\(`inquiry:\$\{shopId\}`, 30, 60_000\)\) \{/, 'if (false) {', 'inquiries: rate limit removed'],
+
+  // Phase 4 groundwork: a named column that should never have been named.
+  ['src/routes/products.js', /'price',\n\s*'stock',/, "'price',\n  'cost_price',\n  'stock',", 'products: cost_price published'],
 ]
 
 let caught = 0
