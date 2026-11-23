@@ -43,6 +43,13 @@ const MUTATIONS = [
   ['src/auth.js', /if \(!identity\.scopes\.includes\(needed\)\) \{/, 'if (false) {', 'auth: scope not enforced'],
   ['src/auth.js', /if \(needed === null\) \{/, 'if (false) {', 'auth: unmapped write allowed'],
   ['src/auth.js', /\? \['read', 'analytics', 'inquiry'\]/, "? ['read']", 'auth: legacy fallback narrowed'],
+
+  // Phase 6: the inquiry endpoint. Every one of these is a field a public form
+  // must not be able to choose.
+  ['src/routes/inquiries.js', /shop_id: shopId,/, 'shop_id: body.shop_id,', 'inquiries: body shop_id'],
+  ['src/routes/inquiries.js', /site_id: siteId,/, 'site_id: body.site_id,', 'inquiries: body site_id'],
+  ['src/routes/inquiries.js', /status: 'new',/, 'status: body.status,', 'inquiries: body status'],
+  ['src/routes/inquiries.js', /if \(!rateLimit\(`inquiry:\$\{shopId\}`, 30, 60_000\)\) \{/, 'if (false) {', 'inquiries: rate limit removed'],
 ]
 
 let caught = 0

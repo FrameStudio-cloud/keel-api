@@ -14,6 +14,7 @@ import { manifestRoutes } from './routes/manifest.js'
 import { pageContentRoutes } from './routes/pageContent.js'
 import { pageViewsRoutes } from './routes/pageViews.js'
 import { eventsRoutes } from './routes/events.js'
+import { inquiriesRoutes } from './routes/inquiries.js'
 import { siteAuth } from './auth.js'
 
 const app = new Hono()
@@ -87,6 +88,7 @@ app.route('/api/manifest', manifestRoutes)
 app.route('/api/page-content', pageContentRoutes)
 app.route('/api/page-views', pageViewsRoutes)
 app.route('/api/events', eventsRoutes)
+app.route('/api/inquiries', inquiriesRoutes)
 
 app.onError((err, c) => {
   console.error('[keel-api]', err)
