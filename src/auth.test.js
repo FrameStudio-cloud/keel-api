@@ -167,24 +167,33 @@ describe('a token identifies exactly one shop', () => {
     expect(response.status).toBe(401)
   })
 
-  it('only treats a literal true as write authority', async () => {
-    // can_write comes from Postgres. Anything that is not exactly `true` - a
-    // string, a number, null - must fail closed, or a malformed row would grant
-    // write access.
-    for (const value of ['true', 1, 't', null, {}]) {
-      resolveSiteToken.mockResolvedValue({ data: { shop_id: SHOP_A, can_write: value }, error: null })
-      const store = new Map()
-      const c = ctx({ method: 'POST', path: '/api/chat/callbacks', headers: { 'x-keel-site-token': 'w' }, store })
-      const { response } = await run(c)
-      expect(response.status, `can_write=${JSON.stringify(value)}`).toBe(403)
-      // The REASON, not just the status.
-      //
-      // Since scopes landed, a loosened can_write is still refused — by the
-      // scope check, one layer down. A test that only asserted 403 would keep
-      // passing with this guard removed, which is exactly what the mutation
-      // harness caught. Asserting the message keeps the two refusals distinct.
-      expect(response.body.error, `can_write=${JSON.stringify(value)}`).toMatch(/write token/)
-    }
+  it('lets the publishable key do what it is scoped for', async () => {
+    // A publishable key reports can_write:false, and it MUST still be able to send
+    // an inquiry. Before scopes, the only way to do that from a browser was to ship
+    // the secret key — the thing this model exists to prevent.
+    resolveSiteToken.mockResolvedValue({
+      data: { shop_id: SHOP_A, can_write: false, scopes: ['read', 'analytics', 'inquiry'] },
+      error: null,
+    })
+
+    const c = ctx({ method: 'POST', path: '/api/chat/callbacks', headers: { 'x-keel-site-token': 'pk' }, store: new Map() })
+    const { reachedNext } = await run(c)
+
+    expect(reachedNext).toBe(true)
+  })
+
+  it('still refuses a scope the publishable key does not have', async () => {
+    resolveSiteToken.mockResolvedValue({
+      data: { shop_id: SHOP_A, can_write: false, scopes: ['read', 'analytics', 'inquiry'] },
+      error: null,
+    })
+
+    const c = ctx({ method: 'POST', path: '/api/orders', headers: { 'x-keel-site-token': 'pk' }, store: new Map() })
+    const { response, reachedNext } = await run(c)
+
+    expect(reachedNext).toBe(false)
+    expect(response.status).toBe(403)
+    expect(response.body.error).toMatch(/order/)
   })
 })
 

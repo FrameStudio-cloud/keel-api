@@ -15,7 +15,7 @@ const MUTATIONS = [
   ['src/routes/manifest.js', /redirect: 'error',/, '', 'manifest: redirect:error removed'],
   ['src/auth.js', /if \(token\) \{/, 'if (true) {', 'auth: token branch widened to accept no token'],
   ['src/auth.js', /const budget = identity\.canWrite \? write : read/, 'const budget = read', 'auth: rate limit un-inverted'],
-  ['src/auth.js', /canWrite: row\.can_write === true/, 'canWrite: !!row.can_write', 'auth: can_write loosened'],
+  ['src/auth.js', /if \(READ_METHODS\.has\(method\)\) return 'read'/, "return 'read'", 'auth: every method needs only read'],
   ['src/routes/services.js', /^\s*\.eq\('shop_id', shopId\)\s*$/m, '', 'services: shop filter removed'],
   ['src/routes/services.js', /\.eq\('visible', true\)/, '', 'services: hidden rows published'],
   ['src/routes/services.js', /\.select\(PUBLIC_SERVICE_COLUMNS\.join\(','\)\)/, ".select('*')", 'services: select(*)'],

@@ -32,8 +32,14 @@ import { supabase } from './db.js'
  * migration path is issuing one and setting it in the site's build.
  */
 
+/**
+ * The HTTP verbs that carry a body. Kept for the scope map's readability; routing
+ * no longer keys authority off the verb — see the note in the middleware.
+ */
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
+/** Reads, for requiredScope(). */
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 /**
  * What each route is FOR.
  *
@@ -71,7 +77,7 @@ const SCOPE_RULES = [
  * what to edit, which is how the omission gets noticed.
  */
 export function requiredScope(method, path) {
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return 'read'
+  if (READ_METHODS.has(method)) return 'read'
   for (const [pattern, scope] of SCOPE_RULES) {
     if (pattern.test(path)) return scope
   }
@@ -209,14 +215,20 @@ export function siteAuth({
     c.set('scopes', identity.scopes)
     c.set('viaToken', true)
 
-    if (WRITE_METHODS.has(c.req.method) && !identity.canWrite) {
-      return c.json({ error: 'This endpoint requires a write token' }, 403)
-    }
-
-    // Scope, not method. A token can be write-capable and still have no business
-    // at this particular route: the credential that files an inquiry is not the
-    // credential that creates an order, and neither is the one that reports a
-    // page view.
+    // ⚠️ THERE IS NO "POST NEEDS A WRITE TOKEN" GATE HERE, AND REMOVING IT IS THE
+    // POINT OF SCOPES.
+    //
+    // It used to read `WRITE_METHODS.has(method) && !canWrite -> 403`, which meant a
+    // PUBLISHABLE key could not POST anything — including the analytics event and
+    // the inquiry it is explicitly scoped for. The only way to send either from a
+    // browser was to ship the SECRET key, which is the one thing this whole model
+    // exists to avoid.
+    //
+    // Authority is now the scope list alone: a publishable token carries
+    // read|analytics|inquiry and does exactly those; `order` is what still needs the
+    // secret. `can_write` stays on the context for compatibility, but routing no
+    // longer reads it — two gates for one decision is how a guard stops being
+    // testable.
     const needed = requiredScope(c.req.method, c.req.path)
     if (needed === null) {
       return c.json(
