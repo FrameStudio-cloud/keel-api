@@ -37,7 +37,8 @@ services:
     # deploy landed, because it names the build.
     healthCheckPath: /
 
-    # CONFIRM: auto-deploy on push to the production branch.
+    # Confirmed 24 Nov 2026: Render builds `main` on push, and GET / reports the
+    # commit it built, so a deploy is verifiable without the dashboard.
     autoDeploy: true
 
     envVars:

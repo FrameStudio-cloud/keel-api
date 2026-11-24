@@ -213,9 +213,13 @@ deliberately, as one change.
 about the live service — do not reason from it. It is kept only because deleting
 it is not this file's decision.
 
-**Still unverified — confirm in the dashboard before relying on it:** plan
-(free vs starter), region, deployed branch, auto-deploy, and the currently
-running commit. The `CONFIRM:` comments in `render.yaml` mark each one.
+**Confirmed 24 Nov 2026 by deploying it:** the service builds `main`, auto-deploy
+is on, and `GET /` reports the commit it built. A push to `main` answered
+`{"ok":true,…,"version":"6667de8d0d53f77e98d33546f24d55b00c7b079e"}` shortly
+after, so a deploy can be verified from outside the dashboard.
+
+**Still unverified — dashboard only:** the instance plan (free vs starter) and the
+region. The remaining `CONFIRM:` comments in `render.yaml` mark those two.
 
 ## Coverage gaps, stated plainly
 
